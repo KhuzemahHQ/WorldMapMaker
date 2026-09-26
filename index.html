@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>World Map Maker — Paint, Annotate & Explore</title>
+  <meta name="description" content="Interactive world map maker: paint countries, draw freehand, place annotated dots, and explore your personalized world map." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ═══════════ LOADING SCREEN ═══════════ -->
+  <div id="loading-screen">
+    <div class="loader-content">
+      <div class="globe-spinner">
+        <svg viewBox="0 0 100 100" width="80" height="80">
+          <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+          <ellipse cx="50" cy="50" rx="45" ry="20" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" transform="rotate(-23 50 50)"/>
+          <path d="M5 50 A45 45 0 0 1 95 50" fill="none" stroke="url(#spinner-grad)" stroke-width="3" stroke-linecap="round">
+            <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="1.2s" repeatCount="indefinite"/>
+          </path>
+          <defs>
+            <linearGradient id="spinner-grad"><stop offset="0%" stop-color="#6366f1"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <p class="loader-text">Loading world data…</p>
+    </div>
+  </div>
+
+  <!-- ═══════════ TOP BAR ═══════════ -->
+  <header id="top-bar">
+    <div class="top-bar-left">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+        </svg>
+        <span>World Map Maker</span>
+      </div>
+    </div>
+    <div class="top-bar-center">
+      <div id="mode-toggle" class="mode-toggle">
+        <button id="btn-view-mode" class="mode-btn active" data-mode="view">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          View
+        </button>
+        <button id="btn-edit-mode" class="mode-btn" data-mode="edit">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          Edit
+        </button>
+        <div class="mode-slider"></div>
+      </div>
+    </div>
+    <div class="top-bar-right">
+      <button id="btn-save" class="icon-btn" title="Save map">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      </button>
+      <button id="btn-load" class="icon-btn" title="Load map">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
+      <button id="btn-export" class="icon-btn" title="Save as JPEG">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </button>
+      <button id="btn-clear-all" class="icon-btn danger" title="Clear everything">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════════ EDIT PANEL ═══════════ -->
+  <aside id="edit-panel" class="edit-panel hidden">
+    <!-- Country Search -->
+    <div class="panel-section">
+      <label class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Find Country
+      </label>
+      <div class="search-wrapper">
+        <input type="text" id="country-search" placeholder="Search countries…" autocomplete="off" />
+        <div id="search-results" class="search-results"></div>
+      </div>
+    </div>
+
+    <!-- Tools -->
+    <div class="panel-section">
+      <label class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        Tools
+      </label>
+      <div class="tool-grid">
+        <button class="tool-btn active" data-tool="country-fill" id="tool-country-fill" title="Fill countries">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+          <span>Fill</span>
+        </button>
+        <button class="tool-btn" data-tool="freehand" id="tool-freehand" title="Freehand paint">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+          <span>Paint</span>
+        </button>
+        <button class="tool-btn" data-tool="dot" id="tool-dot" title="Place annotation dots">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          <span>Dots</span>
+        </button>
+        <button class="tool-btn" data-tool="eraser" id="tool-eraser" title="Erase freehand paint">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 20H7L3 16a1.41 1.41 0 0 1 0-2l9-9 7 7-5 5"/><path d="M6 11l7 7"/></svg>
+          <span>Eraser</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Colors -->
+    <div class="panel-section">
+      <label class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.39-.14-.73-.42-1.01-.27-.27-.58-.49-.58-.99 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-5.5-4.5-10-10-10z"/></svg>
+        Color
+      </label>
+      <div class="color-palette" id="color-palette">
+        <!-- Colors injected by JS -->
+      </div>
+      <div class="active-color-display">
+        <div id="active-color-swatch" class="active-swatch"></div>
+        <span id="active-color-name">Crimson</span>
+      </div>
+    </div>
+
+    <!-- Brush Size (for freehand/eraser) -->
+    <div class="panel-section" id="brush-section">
+      <label class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+        Brush Size
+      </label>
+      <div class="brush-slider-row">
+        <input type="range" id="brush-size" min="2" max="40" value="10" />
+        <span id="brush-size-value">10px</span>
+      </div>
+    </div>
+
+    <!-- Country fill opacity -->
+    <div class="panel-section" id="opacity-section">
+      <label class="section-label">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" opacity="0.5"/></svg>
+        Fill Opacity
+      </label>
+      <div class="brush-slider-row">
+        <input type="range" id="fill-opacity" min="10" max="100" value="55" />
+        <span id="fill-opacity-value">55%</span>
+      </div>
+    </div>
+
+    <!-- Undo / redo for freehand -->
+    <div class="panel-section">
+      <div class="action-row">
+        <button id="btn-undo" class="action-btn" title="Undo last freehand stroke">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          Undo
+        </button>
+        <button id="btn-redo" class="action-btn" title="Redo">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Redo
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════ MAP CONTAINER ═══════════ -->
+  <main id="map-container">
+    <svg id="map-svg"></svg>
+    <canvas id="paint-canvas"></canvas>
+    <!-- Dots are rendered as absolutely positioned elements inside here -->
+    <div id="dots-layer"></div>
+  </main>
+
+  <!-- ═══════════ DOT INFO POPUP ═══════════ -->
+  <div id="dot-popup" class="dot-popup hidden">
+    <div class="dot-popup-header">
+      <h3 id="dot-popup-title">Annotation</h3>
+      <button id="dot-popup-close" class="popup-close">&times;</button>
+    </div>
+    <div id="dot-popup-view" class="dot-popup-body">
+      <p id="dot-popup-text"></p>
+    </div>
+    <div id="dot-popup-edit" class="dot-popup-body hidden">
+      <input type="text" id="dot-title-input" placeholder="Title (optional)" />
+      <textarea id="dot-text-input" rows="5" placeholder="Write your notes here…"></textarea>
+      <div class="popup-actions">
+        <button id="dot-save-btn" class="popup-btn primary">Save</button>
+        <button id="dot-delete-btn" class="popup-btn danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ SAVE JPEG MODAL ═══════════ -->
+  <div id="save-modal-backdrop" class="modal-backdrop hidden"></div>
+  <div id="save-modal" class="save-modal hidden">
+    <div class="save-modal-header">
+      <h3>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        Save Map as JPEG
+      </h3>
+      <button id="save-modal-close" class="popup-close">&times;</button>
+    </div>
+    <div class="save-modal-body">
+      <!-- Map Name -->
+      <div class="save-field">
+        <label for="save-map-name">Map Name</label>
+        <input type="text" id="save-map-name" placeholder="e.g. Culinary Exploration" autocomplete="off" />
+      </div>
+
+      <!-- Directory info -->
+      <div class="save-field">
+        <label>Save Location</label>
+        <div class="save-dir-row">
+          <span id="save-dir-display" class="save-dir-path">No folder selected</span>
+          <button id="save-choose-dir" class="save-dir-btn">Choose Folder</button>
+        </div>
+      </div>
+
+      <!-- Version info (only shown when file already exists) -->
+      <div id="save-version-info" class="save-version-info hidden">
+        <div class="version-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <span id="save-version-text">Existing file found</span>
+        </div>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="save-actions">
+        <button id="save-btn-save" class="save-action-btn primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save
+        </button>
+        <button id="save-btn-replace" class="save-action-btn warning hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          Replace Current
+        </button>
+        <button id="save-btn-new-version" class="save-action-btn accent hidden">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Version
+        </button>
+      </div>
+
+      <!-- Fallback notice for unsupported browsers -->
+      <div id="save-fallback-notice" class="save-fallback hidden">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Your browser doesn't support folder saving. The file will be downloaded instead.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ TOAST ═══════════ -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ═══════════ COUNTRY TOOLTIP ═══════════ -->
+  <div id="country-tooltip" class="country-tooltip hidden"></div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://d3js.org/topojson.v3.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
