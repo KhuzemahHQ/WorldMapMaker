@@ -61,8 +61,8 @@ MyMaps/
 
 2. **Serve the files** using any static server:
    ```bash
-   # Option A: npx (Node.js)
-   npx http-server -p 8080
+   # Option A: npm (Node.js with auto port clearing)
+   npm start
 
    # Option B: Python
    python -m http.server 8080
@@ -125,7 +125,7 @@ WorldMapMaker/
 ```
 
 ### Tech Stack
-- **[D3.js v7](https://d3js.org/)** — Map rendering from TopoJSON, Natural Earth projection, pan/zoom
+- **[D3.js v7](https://d3js.org/)** — Map rendering from TopoJSON, Equal Earth projection, pan/zoom
 - **[TopoJSON](https://github.com/topojson/topojson)** — Efficient world geometry data
 - **Canvas API** — Freehand drawing layer
 - **File System Access API** — Direct folder saving with versioning

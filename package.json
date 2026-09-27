@@ -1,0 +1,11 @@
+{
+  "name": "world-map-maker",
+  "version": "1.0.0",
+  "description": "Interactive world map maker: paint countries, draw freehand, place annotated dots, and explore your personalized world map.",
+  "scripts": {
+    "start": "npx kill-port 8080 && node server.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

@@ -64,7 +64,7 @@
   function initProjection() {
     const w = mapContainer.clientWidth;
     const h = mapContainer.clientHeight;
-    state.projection = d3.geoNaturalEarth1()
+    state.projection = d3.geoEqualEarth()
       .fitSize([w, h], { type: "Sphere" });
     state.path = d3.geoPath(state.projection);
   }
@@ -674,31 +674,112 @@
     }
   }
 
-  /* ── Save / Load / Export / Clear ─────────────────────── */
-  function saveMap() {
+  /* ── Database Save / Load ─────────────────────── */
+  function openSaveModal() {
+    $("#save-modal").classList.remove("hidden");
+    $("#save-modal-backdrop").classList.remove("hidden");
+    $("#save-map-name").value = state.currentMapName === "Untitled Map" ? "" : state.currentMapName;
+  }
+  
+  function closeSaveModal() {
+    $("#save-modal").classList.add("hidden");
+    $("#save-modal-backdrop").classList.add("hidden");
+  }
+
+  async function saveMapToDb() {
+    const name = $("#save-map-name").value.trim() || "Untitled Map";
     const data = {
+      name,
       countryFills: state.countryFills,
       strokes: state.strokes,
       dots: state.dots,
       fillOpacity: state.fillOpacity,
     };
-    const json = JSON.stringify(data);
-    localStorage.setItem("worldMapMaker", json);
-    showToast("Map saved to browser storage");
+
+    try {
+      showToast("Saving to database...");
+      const method = state.currentMapId ? 'PUT' : 'POST';
+      const url = state.currentMapId ? `/api/maps/${state.currentMapId}` : '/api/maps';
+      
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      const result = await res.json();
+      
+      if (result.success) {
+        state.currentMapId = result.id;
+        state.currentMapName = name;
+        showToast("Map saved to database!");
+        closeSaveModal();
+      } else {
+        showToast("Failed to save map.");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Error saving map.");
+    }
   }
 
-  function loadMap() {
-    const raw = localStorage.getItem("worldMapMaker");
-    if (!raw) { showToast("No saved map found"); return; }
+  async function openDbModal() {
+    $("#db-modal").classList.remove("hidden");
+    $("#db-modal-backdrop").classList.remove("hidden");
+    const container = $("#db-list-container");
+    container.innerHTML = "Loading maps...";
+    
     try {
-      const data = JSON.parse(raw);
+      const res = await fetch('/api/maps');
+      const maps = await res.json();
+      
+      if (maps.length === 0) {
+        container.innerHTML = "<p style='color: var(--text-muted); padding: 10px;'>No maps found.</p>";
+        return;
+      }
+      
+      container.innerHTML = "";
+      maps.forEach(map => {
+        const item = document.createElement("div");
+        item.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer;";
+        
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = map.name;
+        nameSpan.style.color = "var(--text-primary)";
+        nameSpan.style.fontWeight = "500";
+        
+        const dateSpan = document.createElement("span");
+        dateSpan.textContent = new Date(map.lastModified).toLocaleDateString();
+        dateSpan.style.color = "var(--text-muted)";
+        dateSpan.style.fontSize = "12px";
+
+        item.addEventListener("click", () => loadMapFromDb(map.id));
+        item.appendChild(nameSpan);
+        item.appendChild(dateSpan);
+        container.appendChild(item);
+      });
+    } catch (err) {
+      container.innerHTML = "<p style='color: var(--danger);'>Failed to load maps.</p>";
+    }
+  }
+
+  function closeDbModal() {
+    $("#db-modal").classList.add("hidden");
+    $("#db-modal-backdrop").classList.add("hidden");
+  }
+
+  async function loadMapFromDb(id) {
+    try {
+      showToast("Loading map...");
+      const res = await fetch(`/api/maps/${id}`);
+      const data = await res.json();
+      
+      state.currentMapId = id;
+      state.currentMapName = data.name;
       state.countryFills = data.countryFills || {};
       state.strokes = data.strokes || [];
       state.dots = data.dots || [];
       state.fillOpacity = data.fillOpacity || 0.55;
-
-      // Re-apply
-      // Reset all country fills first
+      
       mapSvg.querySelectorAll(".country").forEach((el) => {
         el.style.fill = "";
         el.style.fillOpacity = "";
@@ -708,10 +789,16 @@
       renderAllDots();
       $("#fill-opacity").value = Math.round(state.fillOpacity * 100);
       $("#fill-opacity-value").textContent = Math.round(state.fillOpacity * 100) + "%";
-      showToast("Map loaded");
-    } catch (e) {
-      showToast("Failed to load map data");
+      
+      closeDbModal();
+      showToast(`Map loaded: ${data.name}`);
+    } catch (err) {
+      showToast("Failed to load map");
     }
+  }
+
+  function sanitizeName(name) {
+    return name.replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, "_").replace(/^_|_$/g, "");
   }
 
   /* ── Render Map to Canvas (shared helper) ───────────── */
@@ -790,244 +877,23 @@
     });
   }
 
-  /* ── File System Access API – JPEG Save System ────────── */
-  const supportsFileSystemAccess = ("showDirectoryPicker" in window);
-
-  // Persistent save state (survives across modal opens)
-  const saveState = {
-    dirHandle: null,       // FileSystemDirectoryHandle for the chosen root folder
-    mapDirHandle: null,    // Subdirectory handle for this map name
-    mapName: "",           // Current map name
-    latestVersion: 0,      // Highest version number found
-    dirDisplayName: "",    // Display name for the directory
-  };
-
-  function openSaveModal() {
-    const modal = $("#save-modal");
-    const backdrop = $("#save-modal-backdrop");
-    modal.classList.remove("hidden");
-    backdrop.classList.remove("hidden");
-
-    // Pre-fill with last-used name
-    const nameInput = $("#save-map-name");
-    if (saveState.mapName) {
-      nameInput.value = saveState.mapName;
-    }
-
-    // Show/hide fallback notice
-    $("#save-fallback-notice").classList.toggle("hidden", supportsFileSystemAccess);
-
-    // Update directory display
-    updateDirDisplay();
-
-    // Reset button states
-    resetSaveButtons();
-
-    // If we already have a directory and name, check for existing files
-    if (saveState.dirHandle && nameInput.value.trim()) {
-      checkExistingFiles(nameInput.value.trim());
-    }
-  }
-
-  function closeSaveModal() {
-    $("#save-modal").classList.add("hidden");
-    $("#save-modal-backdrop").classList.add("hidden");
-  }
-
-  function updateDirDisplay() {
-    const display = $("#save-dir-display");
-    if (saveState.dirHandle) {
-      display.textContent = saveState.dirDisplayName || saveState.dirHandle.name;
-      display.classList.add("has-dir");
-    } else {
-      display.textContent = "No folder selected";
-      display.classList.remove("has-dir");
-    }
-  }
-
-  function resetSaveButtons() {
-    $("#save-btn-save").classList.remove("hidden");
-    $("#save-btn-replace").classList.add("hidden");
-    $("#save-btn-new-version").classList.add("hidden");
-    $("#save-version-info").classList.add("hidden");
-  }
-
-  async function chooseDirectory() {
-    if (!supportsFileSystemAccess) {
-      showToast("Folder picking not supported — file will be downloaded");
-      return;
-    }
+  async function exportAsImage() {
+    showToast("Rendering JPEG...");
     try {
-      const handle = await window.showDirectoryPicker({ mode: "readwrite" });
-      saveState.dirHandle = handle;
-      saveState.dirDisplayName = handle.name;
-      updateDirDisplay();
-
-      // Check existing files if name is filled
-      const name = $("#save-map-name").value.trim();
-      if (name) {
-        await checkExistingFiles(name);
-      }
-    } catch (e) {
-      if (e.name !== "AbortError") {
-        showToast("Could not access folder");
-      }
-    }
-  }
-
-  /** Sanitize a name for use as a filename / directory name */
-  function sanitizeName(name) {
-    return name
-      .replace(/[<>:"/\\|?*]/g, "_")
-      .replace(/\s+/g, "_")
-      .replace(/_+/g, "_")
-      .replace(/^_|_$/g, "");
-  }
-
-  /**
-   * Check for existing JPEG files in the map's subdirectory.
-   * Updates UI to show Replace / New Version buttons if files exist.
-   */
-  async function checkExistingFiles(mapName) {
-    if (!saveState.dirHandle) {
-      resetSaveButtons();
-      return;
-    }
-
-    const safeName = sanitizeName(mapName);
-    if (!safeName) return;
-
-    try {
-      // Try to get the subdirectory (don't create it yet)
-      const subDir = await saveState.dirHandle.getDirectoryHandle(safeName, { create: false });
-      saveState.mapDirHandle = subDir;
-
-      // Scan for existing version files
-      let maxVersion = 0;
-      let hasBaseFile = false;
-
-      for await (const [entryName] of subDir.entries()) {
-        if (!entryName.endsWith(".jpeg") && !entryName.endsWith(".jpg")) continue;
-
-        const baseName = entryName.replace(/\.(jpeg|jpg)$/, "");
-        if (baseName === safeName) {
-          hasBaseFile = true;
-          if (maxVersion < 1) maxVersion = 1;
-        }
-        // Match _v2, _v3, etc.
-        const vMatch = baseName.match(/_v(\d+)$/);
-        if (vMatch) {
-          const v = parseInt(vMatch[1]);
-          if (v > maxVersion) maxVersion = v;
-        }
-      }
-
-      saveState.latestVersion = maxVersion;
-
-      if (hasBaseFile || maxVersion > 0) {
-        // Show version info + Replace / New Version buttons
-        const latestFile = maxVersion <= 1
-          ? `${safeName}.jpeg`
-          : `${safeName}_v${maxVersion}.jpeg`;
-        $("#save-version-text").textContent = `Latest: ${latestFile}`;
-        $("#save-version-info").classList.remove("hidden");
-        $("#save-btn-save").classList.add("hidden");
-        $("#save-btn-replace").classList.remove("hidden");
-        $("#save-btn-new-version").classList.remove("hidden");
-      } else {
-        resetSaveButtons();
-      }
-    } catch (e) {
-      // Directory doesn't exist yet — first-time save
-      saveState.mapDirHandle = null;
-      saveState.latestVersion = 0;
-      resetSaveButtons();
-    }
-  }
-
-  /**
-   * Core save: renders map to JPEG and writes to the filesystem.
-   * @param {"save"|"replace"|"new-version"} action
-   */
-  async function performSave(action) {
-    const mapName = $("#save-map-name").value.trim();
-    if (!mapName) {
-      showToast("Please enter a map name");
-      $("#save-map-name").focus();
-      return;
-    }
-
-    const safeName = sanitizeName(mapName);
-    saveState.mapName = mapName;
-
-    // Render the map to a JPEG blob
-    showToast("Rendering map…");
-    const canvas = await renderMapToCanvas();
-    const blob = await canvasToJpegBlob(canvas, 0.92);
-
-    // ── Fallback: regular browser download ──
-    if (!supportsFileSystemAccess || !saveState.dirHandle) {
-      let filename;
-      if (action === "new-version") {
-        const nextV = saveState.latestVersion + 1;
-        filename = nextV <= 1 ? `${safeName}.jpeg` : `${safeName}_v${nextV}.jpeg`;
-      } else {
-        filename = `${safeName}.jpeg`;
-      }
-
+      const canvas = await renderMapToCanvas();
+      const blob = await canvasToJpegBlob(canvas, 0.92);
+      const safeName = sanitizeName(state.currentMapName || "Untitled_Map");
+      const filename = `${safeName}.jpeg`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-      showToast(`Downloaded as ${filename}`);
-      closeSaveModal();
-      return;
-    }
-
-    // ── File System Access API ──
-    try {
-      // Get or create the map's subdirectory: <chosen-folder>/<MapName>/
-      const subDir = await saveState.dirHandle.getDirectoryHandle(safeName, { create: true });
-      saveState.mapDirHandle = subDir;
-
-      let filename;
-      if (action === "new-version") {
-        const nextV = Math.max(saveState.latestVersion + 1, 2);
-        filename = `${safeName}_v${nextV}.jpeg`;
-        saveState.latestVersion = nextV;
-      } else {
-        // "save" or "replace" — write to the base filename
-        filename = `${safeName}.jpeg`;
-        if (saveState.latestVersion < 1) saveState.latestVersion = 1;
-      }
-
-      // Write the file
-      const fileHandle = await subDir.getFileHandle(filename, { create: true });
-      const writable = await fileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-
-      const dirPath = saveState.dirDisplayName + "/" + safeName;
-      if (action === "replace") {
-        showToast(`Replaced → ${dirPath}/${filename}`);
-      } else if (action === "new-version") {
-        showToast(`New version → ${dirPath}/${filename}`);
-      } else {
-        showToast(`Saved → ${dirPath}/${filename}`);
-      }
-
-      closeSaveModal();
+      showToast(`Downloaded ${filename}`);
     } catch (e) {
-      console.error("Save error:", e);
-      showToast("Save failed — " + (e.message || "unknown error"));
+      showToast("Failed to export JPEG");
     }
-  }
-
-  /** Opens the save modal (wired to the Export button) */
-  function exportAsImage() {
-    openSaveModal();
   }
 
   function clearAll() {
@@ -1036,6 +902,8 @@
     state.strokes = [];
     state.undoneStrokes = [];
     state.dots = [];
+    state.currentMapId = null;
+    state.currentMapName = "Untitled Map";
 
     mapSvg.querySelectorAll(".country").forEach((el) => {
       el.style.fill = "";
@@ -1088,36 +956,23 @@
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); undo(); }
       if ((e.ctrlKey || e.metaKey) && e.key === "y") { e.preventDefault(); redo(); }
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); saveMap(); }
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); openSaveModal(); }
     });
 
     // Save / Load / Export / Clear
-    $("#btn-save").addEventListener("click", saveMap);
-    $("#btn-load").addEventListener("click", loadMap);
+    $("#btn-save").addEventListener("click", openSaveModal);
+    $("#btn-load").addEventListener("click", openDbModal);
     $("#btn-export").addEventListener("click", exportAsImage);
     $("#btn-clear-all").addEventListener("click", clearAll);
 
     // Save Modal
     $("#save-modal-close").addEventListener("click", closeSaveModal);
     $("#save-modal-backdrop").addEventListener("click", closeSaveModal);
-    $("#save-choose-dir").addEventListener("click", chooseDirectory);
-    $("#save-btn-save").addEventListener("click", () => performSave("save"));
-    $("#save-btn-replace").addEventListener("click", () => performSave("replace"));
-    $("#save-btn-new-version").addEventListener("click", () => performSave("new-version"));
+    $("#save-btn-save").addEventListener("click", saveMapToDb);
 
-    // Re-check existing files when map name changes
-    let nameCheckTimer;
-    $("#save-map-name").addEventListener("input", () => {
-      clearTimeout(nameCheckTimer);
-      nameCheckTimer = setTimeout(() => {
-        const name = $("#save-map-name").value.trim();
-        if (name && saveState.dirHandle) {
-          checkExistingFiles(name);
-        } else {
-          resetSaveButtons();
-        }
-      }, 400);
-    });
+    // Database Modal
+    $("#db-modal-close").addEventListener("click", closeDbModal);
+    $("#db-modal-backdrop").addEventListener("click", closeDbModal);
 
     // Dot popup
     $("#dot-popup-close").addEventListener("click", closeDotPopup);
@@ -1150,23 +1005,6 @@
     setupSearch();
     wireEvents();
     setTool("country-fill"); // default tool
-
-    // Load saved data if exists
-    const saved = localStorage.getItem("worldMapMaker");
-    if (saved) {
-      try {
-        const data = JSON.parse(saved);
-        state.countryFills = data.countryFills || {};
-        state.strokes = data.strokes || [];
-        state.dots = data.dots || [];
-        state.fillOpacity = data.fillOpacity || 0.55;
-        applyCountryFills();
-        redrawCanvas();
-        renderAllDots();
-        $("#fill-opacity").value = Math.round(state.fillOpacity * 100);
-        $("#fill-opacity-value").textContent = Math.round(state.fillOpacity * 100) + "%";
-      } catch (e) { /* ignore */ }
-    }
 
     // Hide loading screen
     loadingScreen.classList.add("fade-out");
