@@ -1,150 +1,151 @@
 # 🌍 World Map Maker
 
-An interactive world map application for painting, annotating, and exploring. Color countries, draw freehand across borders, place annotated dots, and save your personalized maps as JPEG images with version control.
+An interactive world map application for painting, annotating, storing structured per-country JSON data, and exploring. Color countries, maintain per-country checklists or custom JSON objects (both in-app and offline in `data/maps/`), draw freehand across borders, place annotated pins, and export maps as high-resolution JPEG images.
 
-![World Map Maker Screenshot](https://img.shields.io/badge/Made_with-Vanilla_JS-F7DF1E?style=for-the-badge&logo=javascript)
+![World Map Maker](https://img.shields.io/badge/Made_with-Node.js_%26_Vanilla_JS-F7DF1E?style=for-the-badge&logo=javascript)
 ![D3.js](https://img.shields.io/badge/D3.js-v7-F9A03C?style=for-the-badge&logo=d3.js)
 
 ---
 
 ## ✨ Features
 
+### `{ }` Per-Country JSON Data (In-App & Offline)
+Attach arbitrary JSON objects to any country — such as culinary checklists (`tried: true/false`), travel logs, language notes, or custom metadata:
+- **Interactive View**: Visual editor with one-click `✓ tried` / `○ not tried` checklist toggles, boolean maps, custom fields, and starter templates (`+ Dish Checklist`, `+ Boolean Map`, `+ Notes`).
+- **Raw JSON View**: Built-in monospace JSON editor with live syntax validation, `Tab` indentation, and `Prettify` formatting.
+- **Quick Access Anywhere**:
+  - **View Mode**: Click any country on the map to inspect or update its JSON data.
+  - **Edit Mode**: Select the **Country JSON Data** tool, **right-click** any country at any time, or click `{ }` next to a country in search results.
+  - **Top Bar `{ }` Directory**: Browse and filter all countries with stored JSON data.
+- **Seamless Offline Editing**: Maps are saved as clean, human-readable `.json` files in `data/maps/`. Edit them in any text editor and click the `↻` reload icon (or refresh the page) to see updates immediately.
+
 ### 🎨 Country Fill
-Click any country to fill it with your selected color. Click again to remove the fill. Adjust fill opacity with the slider.
+Click any country in Edit Mode (`Fill` tool) to color it with one of 10 palette colors. Click again with the same color to clear the fill. Adjust fill opacity dynamically.
 
-### 🖌️ Freehand Paint
-Draw freely across the map — strokes ignore country borders entirely. Adjustable brush size from 2px to 40px.
+### 🖌️ Freehand Paint & Eraser
+Draw freely across country borders with an adjustable brush (`2px`–`40px`), undo/redo history, and eraser tool.
 
-### 📍 Dot Annotations
-Place pins anywhere on the map. Click a dot to add a title and notes. In View mode, click dots to read your saved annotations.
+### 📍 Location Pins
+Drop coordinate pins anywhere on the map with titles and notes.
 
-### 🔍 Country Search
-Type a country name to find it instantly. Selecting a result smoothly zooms the map and highlights the country with a pulsing border.
+### 📸 JPEG Export
+Export your rendered map (fills, freehand strokes, and pins) as a crisp JPEG image.
 
-### 🗑️ Eraser
-Remove freehand paint strokes with an adjustable eraser tool.
+---
 
-### 💾 Save & Load
-Map data (fills, strokes, dots) is automatically persisted in browser localStorage. Manually save/load at any time.
+## 📂 Human-Editable Data Format (`formatVersion: 2`)
 
-### 📸 JPEG Export with Versioning
-Save your map as a high-quality JPEG image:
-- **Choose a folder** on your computer (via the File System Access API)
-- The app creates a **dedicated subdirectory** for each map name
-- On subsequent saves, choose **Replace** (overwrite) or **New Version** (auto-incremented)
-- Falls back to a standard browser download if your browser doesn't support folder access
+Each saved map lives in `data/maps/<map-slug>.json` (for example, `data/maps/culinary.json`) with self-explanatory keys:
 
+- **Readable filenames**: Derived from your map name (`Culinary` → `data/maps/culinary.json`).
+- **Country names as keys**: Countries are listed alphabetically by name (`"Italy"`, `"Japan"`, `"Mexico"`), with automatic support for common aliases (`"USA"`, `"UK"`, `"UAE"`, `"South Korea"`, etc.) when editing offline.
+- **Named or custom colors**: Set `"color"` to any palette name (`"Crimson"`, `"Emerald"`, `"Sunflower"`, etc.), any CSS hex code (`"#10b981"`), or `null` if uncolored.
+- **Flexible `"data"` object**: Store any valid JSON object per country.
+
+```json
+{
+  "_guide": "Human-editable World Map Maker file. Under 'countries', use country names as keys, set 'color' to a palette name (see colorPalette) or #hex code (or null), and store any custom JSON object in 'data'.",
+  "formatVersion": 2,
+  "id": "culinary",
+  "name": "Culinary",
+  "updatedAt": "2026-11-25T19:15:00.000Z",
+  "settings": {
+    "fillOpacity": 0.55
+  },
+  "colorPalette": {
+    "Crimson": "#e63946",
+    "Tangerine": "#f77f00",
+    "Sunflower": "#fcbf49",
+    "Emerald": "#2a9d8f",
+    "Ocean": "#457b9d",
+    "Indigo": "#6366f1",
+    "Violet": "#8b5cf6",
+    "Rose": "#ec4899",
+    "Slate": "#64748b",
+    "Espresso": "#78350f"
+  },
+  "countries": {
+    "Italy": {
+      "color": "Crimson",
+      "data": {
+        "dishes": [
+          { "name": "Carbonara", "tried": true },
+          { "name": "Osso Buco", "tried": false }
+        ]
+      }
+    },
+    "Japan": {
+      "color": "Emerald",
+      "data": {
+        "dishes": [
+          { "name": "Ramen", "tried": true },
+          { "name": "Okonomiyaki", "tried": false }
+        ],
+        "notes": "Try Hiroshima-style okonomiyaki next"
+      }
+    }
+  },
+  "pins": [
+    {
+      "id": "pin-tokyo",
+      "title": "Tokyo Ramen Street",
+      "notes": "Eight famous ramen shops",
+      "color": "Emerald",
+      "coordinates": {
+        "latitude": 35.6812,
+        "longitude": 139.7671
+      }
+    }
+  ],
+  "freehandStrokes": []
+}
 ```
-MyMaps/
-└── Culinary_Exploration/
-    ├── Culinary_Exploration.jpeg       ← initial save
-    ├── Culinary_Exploration_v2.jpeg    ← first "New Version"
-    ├── Culinary_Exploration_v3.jpeg    ← second "New Version"
-    └── ...
-```
+
+> **Legacy Compatibility**: Older `formatVersion: 1` files using ISO-3166 numeric codes (`countryFills`) and `dots`/`strokes` arrays continue to load automatically and upgrade cleanly when saved.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- A modern web browser (Chrome, Edge, or Brave recommended for full File System Access API support)
-- No build tools, frameworks, or package managers required
+- [Node.js](https://nodejs.org/) (v18+ recommended)
 
 ### Run Locally
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/WorldMapMaker.git
-   cd WorldMapMaker
-   ```
+```bash
+npm install
+npm start
+```
 
-2. **Serve the files** using any static server:
-   ```bash
-   # Option A: npm (Node.js with auto port clearing)
-   npm start
-
-   # Option B: Python
-   python -m http.server 8080
-
-   # Option C: Just open index.html directly in your browser
-   ```
-
-3. **Open** `http://localhost:8080` in your browser
-
-> **Note:** Opening `index.html` directly (via `file://`) will work for most features, but the JPEG folder-save feature requires a local server due to browser security policies.
+Then open `http://localhost:8080` in your browser.
 
 ---
 
-## 🎮 Usage
+## ⌨️ Keyboard Shortcuts
 
-### Modes
-| Mode | Description |
-|------|-------------|
-| **View** (default) | Browse your map. Click dots to read annotations. Pan & zoom freely. |
-| **Edit** | Access all painting and annotation tools via the side panel. |
-
-### Tools (Edit Mode)
-| Tool | Description |
-|------|-------------|
-| **Fill** | Click a country to fill it with the selected color |
-| **Paint** | Freehand drawing — ignores country borders |
-| **Dots** | Click anywhere to place an annotation pin |
-| **Eraser** | Remove freehand paint strokes |
-
-### Color Palette
-10 curated colors: Crimson, Tangerine, Sunflower, Emerald, Ocean, Indigo, Violet, Rose, Slate, Espresso.
-
-### Keyboard Shortcuts
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl + Z` | Undo last freehand stroke |
-| `Ctrl + Y` | Redo |
-| `Ctrl + S` | Save map data to browser storage |
-
----
-
-## 💡 Use Case Ideas
-
-- **🍜 Culinary Exploration** — Shade regions whose cuisine you've tried (green) or want to try (yellow)
-- **✈️ Travel Map** — Mark countries you've visited, drop dots on cities with trip notes
-- **🗣️ Language Map** — Paint regions where people speak languages you know, freehand dialect boundaries
-- **📚 History Study** — Color historical empires, trade routes, or cultural regions
-- **🎯 Bucket List** — Track places you want to visit with annotated dots
+| `Ctrl + S` / `Cmd + S` | Save map file (or save open Country JSON modal) |
+| `Ctrl + Enter` | Save open Raw JSON editor |
+| `Ctrl + Z` / `Ctrl + Y` | Undo / Redo freehand stroke |
+| `Right-Click` on country | Open Country JSON editor directly |
+| `Esc` | Close active modal or popup |
 
 ---
 
 ## 🏗️ Project Structure
 
-```
+```text
 WorldMapMaker/
-├── index.html      # Main HTML — layout, toolbar, edit panel, modals
-├── styles.css      # Dark-mode design system with glassmorphism
-├── app.js          # Core application logic
-└── README.md       # This file
+├── server.js          # Express server & REST API for data/maps/*.json
+├── data/
+│   └── maps/          # Human-editable map JSON files (e.g. culinary.json)
+├── public/
+│   ├── index.html     # Application layout & modals
+│   ├── styles.css     # Dark-mode glassmorphism styling
+│   └── app.js         # Map rendering, Country JSON builder/editor & sync
+└── README.md
 ```
-
-### Tech Stack
-- **[D3.js v7](https://d3js.org/)** — Map rendering from TopoJSON, Equal Earth projection, pan/zoom
-- **[TopoJSON](https://github.com/topojson/topojson)** — Efficient world geometry data
-- **Canvas API** — Freehand drawing layer
-- **File System Access API** — Direct folder saving with versioning
-- **Vanilla CSS** — Premium dark-mode design, no frameworks
-
----
-
-## 🌐 Browser Support
-
-| Feature | Chrome/Edge | Firefox | Safari |
-|---------|:-----------:|:-------:|:------:|
-| Map rendering | ✅ | ✅ | ✅ |
-| Country fill | ✅ | ✅ | ✅ |
-| Freehand paint | ✅ | ✅ | ✅ |
-| Dot annotations | ✅ | ✅ | ✅ |
-| JPEG folder save | ✅ | ⬇️ download | ⬇️ download |
-| localStorage save | ✅ | ✅ | ✅ |
-
-> ⬇️ = Falls back to standard browser download (no folder versioning)
 
 ---
 

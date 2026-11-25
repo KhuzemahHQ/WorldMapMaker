@@ -4,11 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>World Map Maker — Paint, Annotate & Explore</title>
-  <meta name="description" content="Interactive world map maker: paint countries, draw freehand, place annotated dots, and explore your personalized world map." />
+  <meta name="description" content="Interactive world map maker: paint countries, attach per-country JSON data, draw freehand, place annotated pins, and explore your personalized world map." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=3" />
 </head>
 <body>
   <!-- ═══════════ LOADING SCREEN ═══════════ -->
@@ -39,28 +39,39 @@
         </svg>
         <span>World Map Maker</span>
       </div>
+      <div id="active-map-pill" class="active-map-pill hidden" title="Active map file in data/maps/">
+        <span id="active-map-label" class="active-map-name">Untitled</span>
+        <code id="active-map-file" class="active-map-code">data/maps/untitled.json</code>
+        <button id="btn-reload-disk" class="pill-icon-btn" title="Reload latest offline edits from disk">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </button>
+      </div>
     </div>
     <div class="top-bar-center">
       <div id="mode-toggle" class="mode-toggle">
         <button id="btn-view-mode" class="mode-btn active" data-mode="view">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          View
+          <span>View</span>
         </button>
         <button id="btn-edit-mode" class="mode-btn" data-mode="edit">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-          Edit
+          <span>Edit</span>
         </button>
         <div class="mode-slider"></div>
       </div>
     </div>
     <div class="top-bar-right">
-      <button id="btn-save" class="icon-btn" title="Save map">
+      <button id="btn-country-data-list" class="icon-btn with-badge" title="Browse & edit Country JSON data">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></svg>
+        <span id="data-count-badge" class="count-badge hidden">0</span>
+      </button>
+      <button id="btn-save" class="icon-btn" title="Save map (Ctrl+S)">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
       </button>
-      <button id="btn-load" class="icon-btn" title="Maps Database">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+      <button id="btn-load" class="icon-btn" title="Maps Database (data/maps/)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
       </button>
-      <button id="btn-export" class="icon-btn" title="Save as JPEG">
+      <button id="btn-export" class="icon-btn" title="Export as JPEG">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
       </button>
       <button id="btn-clear-all" class="icon-btn danger" title="Clear everything">
@@ -90,7 +101,7 @@
         Tools
       </label>
       <div class="tool-grid">
-        <button class="tool-btn active" data-tool="country-fill" id="tool-country-fill" title="Fill countries">
+        <button class="tool-btn active" data-tool="country-fill" id="tool-country-fill" title="Fill countries with color">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
           <span>Fill</span>
         </button>
@@ -98,19 +109,24 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
           <span>Paint</span>
         </button>
-        <button class="tool-btn" data-tool="dot" id="tool-dot" title="Place annotation dots">
+        <button class="tool-btn" data-tool="dot" id="tool-dot" title="Place annotation pins">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-          <span>Dots</span>
+          <span>Pins</span>
         </button>
         <button class="tool-btn" data-tool="eraser" id="tool-eraser" title="Erase freehand paint">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 20H7L3 16a1.41 1.41 0 0 1 0-2l9-9 7 7-5 5"/><path d="M6 11l7 7"/></svg>
           <span>Eraser</span>
         </button>
+        <button class="tool-btn span-2" data-tool="country-data" id="tool-country-data" title="Click any country to view or edit its custom JSON object">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></svg>
+          <span>Country JSON Data</span>
+        </button>
       </div>
+      <p id="tool-hint" class="tool-hint">Click a country to color it. Right-click any country to edit its JSON.</p>
     </div>
 
     <!-- Colors -->
-    <div class="panel-section">
+    <div class="panel-section" id="color-section">
       <label class="section-label">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.67 1.5-1.5 0-.39-.14-.73-.42-1.01-.27-.27-.58-.49-.58-.99 0-.83.67-1.5 1.5-1.5H16c3.31 0 6-2.69 6-6 0-5.5-4.5-10-10-10z"/></svg>
         Color
@@ -148,6 +164,20 @@
       </div>
     </div>
 
+    <!-- Countries with JSON Data -->
+    <div class="panel-section" id="panel-data-section">
+      <div class="section-label-row">
+        <label class="section-label" style="margin-bottom: 0;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></svg>
+          Country JSONs
+        </label>
+        <span id="panel-data-count" class="section-count-pill">0</span>
+      </div>
+      <div id="panel-country-data-list" class="panel-data-list">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
     <!-- Undo / redo for freehand -->
     <div class="panel-section">
       <div class="action-row">
@@ -167,11 +197,11 @@
   <main id="map-container">
     <svg id="map-svg"></svg>
     <canvas id="paint-canvas"></canvas>
-    <!-- Dots are rendered as absolutely positioned elements inside here -->
+    <!-- Pins are rendered as absolutely positioned elements inside here -->
     <div id="dots-layer"></div>
   </main>
 
-  <!-- ═══════════ DOT INFO POPUP ═══════════ -->
+  <!-- ═══════════ PIN INFO POPUP ═══════════ -->
   <div id="dot-popup" class="dot-popup hidden">
     <div class="dot-popup-header">
       <h3 id="dot-popup-title">Annotation</h3>
@@ -190,28 +220,137 @@
     </div>
   </div>
 
+  <!-- ═══════════ COUNTRY JSON DATA MODAL ═══════════ -->
+  <div id="country-modal-backdrop" class="modal-backdrop hidden"></div>
+  <div id="country-modal" class="country-modal hidden" role="dialog" aria-labelledby="country-modal-name">
+    <div class="country-modal-header">
+      <div class="country-modal-title-group">
+        <div class="country-title-row">
+          <h3 id="country-modal-name">Country</h3>
+          <button id="country-modal-zoom" class="mini-icon-btn" title="Zoom to country on map" type="button">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+        </div>
+        <p id="country-modal-subtitle" class="country-modal-subtitle">countries["Country"].data</p>
+      </div>
+      <button id="country-modal-close" class="popup-close" type="button">&times;</button>
+    </div>
+
+    <!-- Quick country fill color bar -->
+    <div class="country-modal-colorbar">
+      <span class="colorbar-label">Map Color:</span>
+      <div id="country-modal-swatches" class="mini-swatches"></div>
+      <button id="country-modal-clear-color" class="mini-btn" type="button" title="Remove fill color">No Fill</button>
+    </div>
+
+    <!-- Tabs: Interactive vs Raw JSON -->
+    <div class="editor-tabs">
+      <button id="tab-btn-interactive" class="editor-tab active" data-tab="interactive" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Interactive View
+      </button>
+      <button id="tab-btn-raw" class="editor-tab" data-tab="raw" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Raw JSON
+      </button>
+    </div>
+
+    <!-- Interactive Builder Pane -->
+    <div id="country-editor-interactive" class="country-modal-body">
+      <div id="interactive-fields-container" class="interactive-fields-container">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <div class="interactive-add-section">
+        <div class="template-pills-row" id="template-pills-row">
+          <span class="template-label">Quick add:</span>
+          <button class="template-pill" data-template="dishes" type="button">+ Dish Checklist</button>
+          <button class="template-pill" data-template="boolmap" type="button">+ Boolean Map</button>
+          <button class="template-pill" data-template="notes" type="button">+ Notes</button>
+        </div>
+        <div class="add-field-row">
+          <input type="text" id="new-field-key" placeholder="Custom field name (e.g. dishes, cities, visited)…" autocomplete="off" />
+          <select id="new-field-type">
+            <option value="checklist">Tried / Not Tried List</option>
+            <option value="boolmap">Key → Boolean Map</option>
+            <option value="boolean">Boolean (true/false)</option>
+            <option value="string">Text</option>
+            <option value="number">Number</option>
+            <option value="list">List of Strings</option>
+            <option value="object">Nested Object {}</option>
+          </select>
+          <button id="btn-add-field" class="mini-btn accent-btn" type="button">+ Add</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Raw JSON Pane -->
+    <div id="country-editor-raw" class="country-modal-body hidden">
+      <div class="raw-json-toolbar">
+        <span id="json-validation-status" class="json-status valid">✓ Valid JSON object</span>
+        <div class="raw-toolbar-actions">
+          <button id="btn-json-template-dishes" class="mini-btn" type="button">+ Dishes Sample</button>
+          <button id="btn-json-format" class="mini-btn" type="button">Prettify</button>
+        </div>
+      </div>
+      <textarea id="country-json-textarea" rows="13" spellcheck="false" placeholder='{&#10;  "dishes": [&#10;    { "name": "Ramen", "tried": true },&#10;    { "name": "Okonomiyaki", "tried": false }&#10;  ]&#10;}'></textarea>
+      <p class="raw-json-hint">Tip: You can store any valid JSON object here, or edit <code>data/maps/&lt;map&gt;.json</code> directly in any text editor.</p>
+    </div>
+
+    <!-- Footer -->
+    <div class="country-modal-footer">
+      <button id="country-btn-clear" class="popup-btn danger" type="button">Clear Data</button>
+      <div class="country-modal-footer-right">
+        <button id="country-btn-cancel" class="popup-btn secondary" type="button">Cancel</button>
+        <button id="country-btn-save" class="popup-btn primary" type="button">Save Country JSON</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════ COUNTRY DATA DIRECTORY MODAL ═══════════ -->
+  <div id="data-overview-backdrop" class="modal-backdrop hidden"></div>
+  <div id="data-overview-modal" class="save-modal hidden" style="width: 540px;">
+    <div class="save-modal-header">
+      <h3>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1"/><path d="M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1"/></svg>
+        Country JSON Data
+      </h3>
+      <button id="data-overview-close" class="popup-close" type="button">&times;</button>
+    </div>
+    <div class="save-modal-body">
+      <div class="save-field">
+        <input type="text" id="data-overview-search" placeholder="Filter or type any country name to add/edit JSON…" autocomplete="off" />
+      </div>
+      <div id="data-overview-list" class="db-list-container">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+  </div>
+
   <!-- ═══════════ SAVE MODAL ═══════════ -->
   <div id="save-modal-backdrop" class="modal-backdrop hidden"></div>
   <div id="save-modal" class="save-modal hidden">
     <div class="save-modal-header">
       <h3>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-        Save Map to Database
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save Map File
       </h3>
-      <button id="save-modal-close" class="popup-close">&times;</button>
+      <button id="save-modal-close" class="popup-close" type="button">&times;</button>
     </div>
     <div class="save-modal-body">
-      <!-- Map Name -->
       <div class="save-field">
         <label for="save-map-name">Map Name</label>
         <input type="text" id="save-map-name" placeholder="e.g. Culinary Exploration" autocomplete="off" />
+        <p class="save-file-hint">Saved as human-editable JSON: <code id="save-file-preview">data/maps/untitled-map.json</code></p>
       </div>
 
-      <!-- Action buttons -->
       <div class="save-actions">
-        <button id="save-btn-save" class="save-action-btn primary">
+        <button id="save-btn-save" class="save-action-btn primary" type="button">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          Save to DB
+          <span id="save-btn-label">Save Map</span>
+        </button>
+        <button id="save-btn-copy" class="save-action-btn secondary-action hidden" type="button">
+          Save as New Copy
         </button>
       </div>
     </div>
@@ -219,16 +358,17 @@
 
   <!-- ═══════════ DATABASE MODAL ═══════════ -->
   <div id="db-modal-backdrop" class="modal-backdrop hidden"></div>
-  <div id="db-modal" class="save-modal hidden" style="width: 500px;">
+  <div id="db-modal" class="save-modal hidden" style="width: 540px;">
     <div class="save-modal-header">
       <h3>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-        Maps Database
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        Maps in <code>data/maps/</code>
       </h3>
-      <button id="db-modal-close" class="popup-close">&times;</button>
+      <button id="db-modal-close" class="popup-close" type="button">&times;</button>
     </div>
     <div class="save-modal-body">
-      <div id="db-list-container" style="max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+      <p class="db-helper-note">Each map is stored as a readable JSON file in <code>data/maps/</code>. Edit files offline anytime and reload here.</p>
+      <div id="db-list-container" class="db-list-container">
         <!-- Maps will be listed here -->
       </div>
     </div>
@@ -242,6 +382,6 @@
 
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://d3js.org/topojson.v3.min.js"></script>
-  <script src="app.js?v=2"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>

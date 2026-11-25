@@ -1,0 +1,142 @@
+{
+  "_guide": "Human-editable World Map Maker file. Under 'countries', use country names as keys, set 'color' to a palette name (see colorPalette) or #hex code (or null), and store any custom JSON object in 'data'.",
+  "formatVersion": 2,
+  "id": "culinary",
+  "name": "Culinary",
+  "updatedAt": "2026-11-25T19:15:00.000Z",
+  "settings": {
+    "fillOpacity": 0.55
+  },
+  "colorPalette": {
+    "Crimson": "#e63946",
+    "Tangerine": "#f77f00",
+    "Sunflower": "#fcbf49",
+    "Emerald": "#2a9d8f",
+    "Ocean": "#457b9d",
+    "Indigo": "#6366f1",
+    "Violet": "#8b5cf6",
+    "Rose": "#ec4899",
+    "Slate": "#64748b",
+    "Espresso": "#78350f"
+  },
+  "countries": {
+    "Afghanistan": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Australia": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Bangladesh": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Canada": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "China": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Egypt": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "France": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Germany": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Greece": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "India": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Indonesia": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Iraq": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Italy": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Japan": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Lebanon": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Malaysia": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Mexico": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Morocco": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Nepal": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Pakistan": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Saudi Arabia": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "South Korea": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Syria": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Taiwan": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Thailand": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Turkey": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "United Kingdom": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "United States of America": {
+      "color": "Crimson",
+      "data": {}
+    },
+    "Vietnam": {
+      "color": "Crimson",
+      "data": {}
+    }
+  },
+  "pins": [],
+  "freehandStrokes": []
+}
