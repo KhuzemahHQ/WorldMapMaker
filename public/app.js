@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════
-   World Map Maker — Core Application
-   Supports per-country JSON objects, interactive checklists,
-   raw JSON editing, and human-editable v2 map files.
+   World Map Maker — Code-Driven Application & JSON Portal
+   Pipeline: data/maps/*.json <-> /api/maps <-> D3 SVG Map & Live JSON Editor
+   JPEG images are ONLY generated on-demand via the Share button.
    ═══════════════════════════════════════════════════════════ */
 
 (function () {
@@ -21,70 +21,20 @@
     { name: "Espresso",  hex: "#78350f" },
   ];
 
-  /* Microstates & regions not in 110m Natural Earth polygons so offline/search JSON still works */
-  const EXTRA_COUNTRIES = [
-    "Andorra", "Antigua and Barbuda", "Bahrain", "Barbados", "Cape Verde",
-    "Comoros", "Dominica", "Grenada", "Hong Kong", "Kiribati", "Liechtenstein",
-    "Macau", "Maldives", "Malta", "Marshall Islands", "Mauritius", "Micronesia",
-    "Monaco", "Saint Kitts and Nevis", "Saint Lucia",
-    "Saint Vincent and the Grenadines", "San Marino", "Sao Tome and Principe",
-    "Seychelles", "Singapore", "Tonga", "Tuvalu", "Vatican City",
-  ];
-
-  /* Common country aliases for human-friendly offline JSON editing */
-  const COUNTRY_ALIASES = {
-    "usa": "United States of America",
-    "us": "United States of America",
-    "u.s.": "United States of America",
-    "u.s.a.": "United States of America",
-    "united states": "United States of America",
-    "america": "United States of America",
-    "uk": "United Kingdom",
-    "u.k.": "United Kingdom",
-    "great britain": "United Kingdom",
-    "britain": "United Kingdom",
-    "england": "United Kingdom",
-    "uae": "United Arab Emirates",
-    "emirates": "United Arab Emirates",
-    "korea": "South Korea",
-    "republic of korea": "South Korea",
-    "rok": "South Korea",
-    "dprk": "North Korea",
-    "russian federation": "Russia",
-    "czechia": "Czech Republic",
-    "turkiye": "Turkey",
-    "türkiye": "Turkey",
-    "viet nam": "Vietnam",
-    "cote d'ivoire": "Ivory Coast",
-    "côte d'ivoire": "Ivory Coast",
-    "drc": "Democratic Republic of the Congo",
-    "dr congo": "Democratic Republic of the Congo",
-    "congo-kinshasa": "Democratic Republic of the Congo",
-    "congo": "Republic of the Congo",
-    "congo-brazzaville": "Republic of the Congo",
-    "holland": "Netherlands",
-    "the netherlands": "Netherlands",
-    "burma": "Myanmar",
-    "swaziland": "Eswatini",
-    "macedonia": "North Macedonia",
-    "bosnia": "Bosnia and Herzegovina",
-    "trinidad": "Trinidad and Tobago",
-    "east timor": "Timor-Leste",
-    "n cyprus": "N. Cyprus",
-    "northern cyprus": "N. Cyprus",
-  };
+  const FILE_GUIDE =
+    "Human-editable World Map Maker file. Under 'countries', keys are Country Names, 'color' is a palette name (see colorPalette) or #hex (or null), and 'data' holds any custom JSON object.";
 
   const TOOL_HINTS = {
     "country-fill": "Click a country to color it. Right-click any country to edit its JSON.",
     "country-data": "Click any country on the map to view or edit its custom JSON object.",
-    "freehand": "Drag anywhere on the map to paint freehand strokes across borders.",
-    "dot": "Click anywhere on the map to drop an annotated location pin.",
-    "eraser": "Drag across freehand paint strokes to erase them.",
+    "freehand": "Drag anywhere on the map to paint freehand vector strokes.",
+    "dot": "Click anywhere on the map to drop an annotated coordinate pin.",
+    "eraser": "Drag across freehand strokes to erase them.",
   };
 
   /* ── State ────────────────────────────────────────────── */
   const state = {
-    mode: "view",            // "view" | "edit"
+    mode: "view",            // "view" | "edit" | "json"
     tool: "country-fill",    // "country-fill" | "country-data" | "freehand" | "dot" | "eraser"
     color: COLORS[0].hex,
     colorName: COLORS[0].name,
@@ -94,7 +44,14 @@
     currentMapId: null,
     currentMapName: "Untitled Map",
     currentMapFile: null,
-    loadedFormatVersion: 2,
+    portalJsonDirty: false,
+
+    // Shared country catalog loaded from /api/catalog
+    catalog: {
+      isoToName: {},
+      extraCountries: [],
+      aliases: {},
+    },
 
     // Country fills: { [countryId]: hex }
     countryFills: {},
@@ -105,15 +62,15 @@
     // Custom color palette overrides preserved from file
     customPalette: {},
 
-    // Freehand strokes: array of { points, color, size }
+    // Freehand vector strokes: array of { points, color, size }
     strokes: [],
     undoneStrokes: [],
     currentStroke: null,
 
-    // Pins/Dots: array of { id, geoCoords:[lon,lat], title, text, color }
+    // Coordinate pins: array of { id, geoCoords:[lon,lat], title, text, color }
     dots: [],
 
-    // Map D3 state
+    // D3 SVG rendering state
     transform: null,
     projection: null,
     path: null,
@@ -121,7 +78,7 @@
     countryNames: [],
   };
 
-  /* Country Modal Working State */
+  /* Per-Country Modal Working State */
   const modalState = {
     isOpen: false,
     countryId: null,
@@ -135,29 +92,28 @@
   const $ = (s) => document.querySelector(s);
   const $$ = (s) => document.querySelectorAll(s);
 
-  const mapContainer  = $("#map-container");
-  const mapSvg        = $("#map-svg");
-  const paintCanvas   = $("#paint-canvas");
-  const dotsLayer     = $("#dots-layer");
-  const editPanel     = $("#edit-panel");
-  const loadingScreen = $("#loading-screen");
+  const mapContainer    = $("#map-container");
+  const mapSvg          = $("#map-svg");
+  const paintCanvas     = $("#paint-canvas");
+  const dotsLayer       = $("#dots-layer");
+  const editPanel       = $("#edit-panel");
+  const jsonPortalPanel = $("#json-portal-panel");
+  const loadingScreen   = $("#loading-screen");
 
   const ctx = paintCanvas.getContext("2d");
 
-  /* ── Color Helpers ────────────────────────────────────── */
+  /* ── Utility & Color Helpers ──────────────────────────── */
   function resolveColorHex(colorInput, filePalette = {}) {
     if (!colorInput || typeof colorInput !== "string") return null;
     const trimmed = colorInput.trim();
     if (!trimmed) return null;
 
-    // Check file's colorPalette first (case-insensitive)
     for (const [name, hex] of Object.entries(filePalette || {})) {
       if (name.toLowerCase() === trimmed.toLowerCase() && typeof hex === "string") {
         return hex.trim();
       }
     }
 
-    // Check built-in palette
     const match = COLORS.find((c) => c.name.toLowerCase() === trimmed.toLowerCase());
     if (match) return match.hex;
 
@@ -202,7 +158,60 @@
     return slug || "untitled-map";
   }
 
-  /* ── Projection & Path ────────────────────────────────── */
+  /* ── Sync Status & Auto-Save Pipeline ─────────────────── */
+  let autoSaveTimer = null;
+
+  function setSyncStatus(status, label) {
+    const badge = $("#sync-status-badge");
+    if (!badge) return;
+    badge.classList.remove("unsaved", "saving");
+    if (status === "unsaved") badge.classList.add("unsaved");
+    if (status === "saving") badge.classList.add("saving");
+    badge.textContent = label;
+  }
+
+  function refreshPortalJsonFromStateIfClean() {
+    if (state.mode === "json" && !state.portalJsonDirty) {
+      renderPortalJsonEditorFromState();
+    }
+  }
+
+  function scheduleAutoSave() {
+    refreshPortalJsonFromStateIfClean();
+
+    if (!state.currentMapId) {
+      setSyncStatus("unsaved", "● Unsaved");
+      return;
+    }
+
+    setSyncStatus("saving", "Saving…");
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(async () => {
+      try {
+        const payload = serializeStateToMapDocument(state.currentMapName);
+        const res = await fetch(`/api/maps/${encodeURIComponent(state.currentMapId)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          state.currentMapId = result.id;
+          state.currentMapFile = result.fileName || `${result.id}.json`;
+          updateActiveMapBanner();
+          setSyncStatus("saved", "✓ Synced");
+          refreshPortalJsonFromStateIfClean();
+        } else {
+          setSyncStatus("unsaved", "● Save error");
+        }
+      } catch (err) {
+        console.error(err);
+        setSyncStatus("unsaved", "● Offline");
+      }
+    }, 450);
+  }
+
+  /* ── Projection & World Geometry Pipeline ─────────────── */
   function initProjection() {
     const w = mapContainer.clientWidth;
     const h = mapContainer.clientHeight;
@@ -210,13 +219,22 @@
     state.path = d3.geoPath(state.projection);
   }
 
-  /* ── Load World Data ──────────────────────────────────── */
-  async function loadWorldData() {
-    const url = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
-    const topoData = await d3.json(url);
-    const countries = topojson.feature(topoData, topoData.objects.countries);
+  async function loadCatalogAndWorldData() {
+    const worldUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+    const [catalogData, topoData] = await Promise.all([
+      fetch("/api/catalog").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      d3.json(worldUrl),
+    ]);
 
-    const idToName = buildCountryNameMap();
+    if (catalogData) {
+      state.catalog = {
+        isoToName: catalogData.isoToName || {},
+        extraCountries: catalogData.extraCountries || [],
+        aliases: catalogData.aliases || {},
+      };
+    }
+
+    const countries = topojson.feature(topoData, topoData.objects.countries);
     const seenNames = new Set();
 
     countries.features.forEach((f, idx) => {
@@ -229,7 +247,8 @@
 
     state.geoData = countries;
     state.countryNames = countries.features.map((f) => {
-      const name = idToName[f.id] || f.properties?.name || `Region ${f.id}`;
+      const name =
+        state.catalog.isoToName[f.id] || f.properties?.name || `Region ${f.id}`;
       seenNames.add(name.toLowerCase());
       return {
         id: f.id,
@@ -239,8 +258,7 @@
       };
     });
 
-    // Register microstates/regions so they can be searched and preserved in JSON
-    for (const extraName of EXTRA_COUNTRIES) {
+    for (const extraName of state.catalog.extraCountries) {
       if (!seenNames.has(extraName.toLowerCase())) {
         seenNames.add(extraName.toLowerCase());
         state.countryNames.push({
@@ -252,61 +270,23 @@
       }
     }
 
-    state.countryNames.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+    state.countryNames.sort((a, b) =>
+      a.name.localeCompare(b.name, "en", { sensitivity: "base" })
+    );
+
+    populateCountriesDatalist();
     return countries;
   }
 
-  /* Numeric ISO-3166 ID → canonical human-readable country name */
-  function buildCountryNameMap() {
-    return {
-      "004": "Afghanistan", "008": "Albania", "012": "Algeria", "024": "Angola",
-      "032": "Argentina", "051": "Armenia", "036": "Australia", "040": "Austria",
-      "031": "Azerbaijan", "044": "Bahamas", "050": "Bangladesh", "112": "Belarus",
-      "056": "Belgium", "084": "Belize", "204": "Benin", "064": "Bhutan", "068": "Bolivia",
-      "070": "Bosnia and Herzegovina", "072": "Botswana", "076": "Brazil",
-      "096": "Brunei", "100": "Bulgaria", "854": "Burkina Faso", "108": "Burundi",
-      "116": "Cambodia", "120": "Cameroon", "124": "Canada",
-      "140": "Central African Republic", "148": "Chad", "152": "Chile", "156": "China",
-      "170": "Colombia", "178": "Republic of the Congo",
-      "180": "Democratic Republic of the Congo", "188": "Costa Rica",
-      "384": "Ivory Coast", "191": "Croatia", "192": "Cuba", "196": "Cyprus",
-      "203": "Czech Republic", "208": "Denmark", "262": "Djibouti",
-      "214": "Dominican Republic", "218": "Ecuador", "818": "Egypt",
-      "222": "El Salvador", "226": "Equatorial Guinea", "232": "Eritrea",
-      "233": "Estonia", "231": "Ethiopia", "238": "Falkland Islands", "242": "Fiji",
-      "246": "Finland", "250": "France", "266": "Gabon", "270": "Gambia",
-      "268": "Georgia", "276": "Germany", "288": "Ghana", "300": "Greece",
-      "304": "Greenland", "320": "Guatemala", "324": "Guinea", "624": "Guinea-Bissau",
-      "328": "Guyana", "332": "Haiti", "340": "Honduras", "348": "Hungary",
-      "352": "Iceland", "356": "India", "360": "Indonesia", "364": "Iran", "368": "Iraq",
-      "372": "Ireland", "376": "Israel", "380": "Italy", "388": "Jamaica", "392": "Japan",
-      "400": "Jordan", "398": "Kazakhstan", "404": "Kenya", "408": "North Korea",
-      "410": "South Korea", "414": "Kuwait", "417": "Kyrgyzstan", "418": "Laos",
-      "428": "Latvia", "422": "Lebanon", "426": "Lesotho", "430": "Liberia",
-      "434": "Libya", "440": "Lithuania", "442": "Luxembourg", "807": "North Macedonia",
-      "450": "Madagascar", "454": "Malawi", "458": "Malaysia", "466": "Mali",
-      "478": "Mauritania", "484": "Mexico", "496": "Mongolia", "499": "Montenegro",
-      "504": "Morocco", "508": "Mozambique", "104": "Myanmar", "516": "Namibia",
-      "524": "Nepal", "528": "Netherlands", "554": "New Zealand", "558": "Nicaragua",
-      "562": "Niger", "566": "Nigeria", "578": "Norway", "512": "Oman", "586": "Pakistan",
-      "275": "Palestine", "591": "Panama", "598": "Papua New Guinea", "600": "Paraguay",
-      "604": "Peru", "608": "Philippines", "616": "Poland", "620": "Portugal",
-      "634": "Qatar", "642": "Romania", "643": "Russia", "646": "Rwanda",
-      "682": "Saudi Arabia", "686": "Senegal", "688": "Serbia", "694": "Sierra Leone",
-      "703": "Slovakia", "705": "Slovenia", "706": "Somalia", "710": "South Africa",
-      "728": "South Sudan", "724": "Spain", "144": "Sri Lanka", "729": "Sudan",
-      "740": "Suriname", "748": "Eswatini", "752": "Sweden", "756": "Switzerland",
-      "760": "Syria", "158": "Taiwan", "762": "Tajikistan", "834": "Tanzania",
-      "764": "Thailand", "768": "Togo", "780": "Trinidad and Tobago", "788": "Tunisia",
-      "792": "Turkey", "795": "Turkmenistan", "800": "Uganda", "804": "Ukraine",
-      "784": "United Arab Emirates", "826": "United Kingdom",
-      "840": "United States of America", "858": "Uruguay", "860": "Uzbekistan",
-      "862": "Venezuela", "704": "Vietnam", "887": "Yemen", "894": "Zambia",
-      "716": "Zimbabwe", "-99": "N. Cyprus", "010": "Antarctica",
-      "570": "Niue", "574": "Norfolk Island", "585": "Palau",
-      "090": "Solomon Islands", "548": "Vanuatu", "882": "Samoa",
-      "162": "Christmas Island",
-    };
+  function populateCountriesDatalist() {
+    const datalist = $("#world-countries-datalist");
+    if (!datalist) return;
+    datalist.innerHTML = "";
+    state.countryNames.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = c.name;
+      datalist.appendChild(opt);
+    });
   }
 
   function getCountryEntryById(id) {
@@ -317,24 +297,20 @@
     const key = String(rawKey || "").trim();
     if (!key) return null;
 
-    // 1. Exact ID match (including legacy numeric ISO IDs like "392" or "004")
     const byId = state.countryNames.find((c) => String(c.id) === key);
     if (byId) return byId;
 
-    // Zero-padded 3-digit numeric ISO check (e.g. "4" -> "004")
     if (/^\d{1,3}$/.test(key)) {
       const padded = key.padStart(3, "0");
       const byPadded = state.countryNames.find((c) => String(c.id) === padded);
       if (byPadded) return byPadded;
     }
 
-    // 2. Exact name match (case-insensitive)
     const lower = key.toLowerCase();
     const byName = state.countryNames.find((c) => c.name.toLowerCase() === lower);
     if (byName) return byName;
 
-    // 3. Common alias match
-    const aliasTarget = COUNTRY_ALIASES[lower];
+    const aliasTarget = state.catalog.aliases[lower];
     if (aliasTarget) {
       const byAlias = state.countryNames.find(
         (c) => c.name.toLowerCase() === aliasTarget.toLowerCase()
@@ -342,7 +318,6 @@
       if (byAlias) return byAlias;
     }
 
-    // 4. Preserve custom offline country/region name so user data is never lost
     const customEntry = {
       id: `custom:${key}`,
       name: key,
@@ -350,7 +325,10 @@
       hasGeometry: false,
     };
     state.countryNames.push(customEntry);
-    state.countryNames.sort((a, b) => a.name.localeCompare(b.name, "en", { sensitivity: "base" }));
+    state.countryNames.sort((a, b) =>
+      a.name.localeCompare(b.name, "en", { sensitivity: "base" })
+    );
+    populateCountriesDatalist();
     return customEntry;
   }
 
@@ -358,7 +336,6 @@
   function summarizeCountryData(data) {
     if (!hasNonEmptyData(data)) return "";
 
-    // Check for checklist arrays (e.g. dishes: [{ name, tried }])
     for (const [key, val] of Object.entries(data)) {
       if (Array.isArray(val) && val.length > 0 && val.every((item) => isPlainObject(item))) {
         const boolKey = detectChecklistBoolKey(val);
@@ -375,7 +352,6 @@
       }
     }
 
-    // Top-level boolean map (e.g. { "Ramen": true, "Sushi": false })
     if (isBooleanMapObject(data)) {
       const entries = Object.values(data);
       const trueCount = entries.filter(Boolean).length;
@@ -386,7 +362,7 @@
     return keys.length === 1 ? `1 field (${keys[0]})` : `${keys.length} fields`;
   }
 
-  /* ── Render Map ───────────────────────────────────────── */
+  /* ── Render Code-Based SVG Map ────────────────────────── */
   function renderMap(countries) {
     const svg = d3.select("#map-svg");
     svg.selectAll("*").remove();
@@ -474,7 +450,7 @@
 
     const listEl = $("#panel-country-data-list");
     if (count === 0) {
-      listEl.innerHTML = `<p class="panel-data-empty">No country JSONs yet. Click a country with <strong>Country JSON Data</strong> or right-click any country.</p>`;
+      listEl.innerHTML = `<p class="panel-data-empty">No custom country JSONs yet. Click any country or switch to <strong>JSON</strong> mode.</p>`;
       return;
     }
 
@@ -541,13 +517,26 @@
   function onCountryClick(event, d) {
     if (event.defaultPrevented) return;
 
-    // In View mode, clicking any country opens its Country JSON modal
+    // In JSON Portal mode, clicking a country highlights/focuses it in the JSON editor (or opens modal if desired)
+    if (state.mode === "json") {
+      const entry = getCountryEntryById(d.id);
+      if (entry) {
+        $("#portal-country-input").value = entry.name;
+        const found = focusCountryInPortalTextarea(entry.name);
+        if (!found) {
+          showToast(`${entry.name} — click "+ Country" in JSON panel to insert, or right-click for checklist`);
+        }
+      }
+      return;
+    }
+
+    // In View mode, clicking any country opens its Country JSON & Checklist modal
     if (state.mode === "view") {
       openCountryModal(d.id);
       return;
     }
 
-    // In Edit mode, route according to selected tool
+    // In Edit mode
     if (state.tool === "dot") {
       onMapClickForDot(event);
       return;
@@ -572,9 +561,11 @@
       el.style.fill = state.color;
       el.style.fillOpacity = state.fillOpacity;
     }
+
+    scheduleAutoSave();
   }
 
-  /* ── Canvas Sizing & Freehand Drawing ─────────────────── */
+  /* ── Freehand Vector Stroke Layer ─────────────────────── */
   function resizeCanvas() {
     const rect = mapContainer.getBoundingClientRect();
     paintCanvas.width = rect.width * window.devicePixelRatio;
@@ -624,6 +615,7 @@
       isDrawing = false;
       if (state.currentStroke && state.currentStroke.points.length > 1) {
         state.strokes.push(state.currentStroke);
+        scheduleAutoSave();
       }
       state.currentStroke = null;
     };
@@ -693,20 +685,21 @@
     }
   }
 
-  /* ── Undo / Redo ──────────────────────────────────────── */
   function undo() {
     if (state.strokes.length === 0) return;
     state.undoneStrokes.push(state.strokes.pop());
     redrawCanvas();
+    scheduleAutoSave();
   }
 
   function redo() {
     if (state.undoneStrokes.length === 0) return;
     state.strokes.push(state.undoneStrokes.pop());
     redrawCanvas();
+    scheduleAutoSave();
   }
 
-  /* ── Pins / Dots ──────────────────────────────────────── */
+  /* ── Coordinate Pins ──────────────────────────────────── */
   function onMapClickForDot(event) {
     if (state.mode !== "edit" || state.tool !== "dot") return;
     if (event.target.closest(".map-dot")) return;
@@ -734,6 +727,7 @@
 
     state.dots.push(dot);
     renderDot(dot);
+    scheduleAutoSave();
     showToast("Pin placed — click it to add notes");
   }
 
@@ -774,7 +768,6 @@
     state.dots.forEach((d) => renderDot(d));
   }
 
-  /* ── Pin Popup ────────────────────────────────────────── */
   let activeDot = null;
 
   function openDotPopup(dot, dotEl) {
@@ -814,6 +807,7 @@
     activeDot.title = $("#dot-title-input").value.trim();
     activeDot.text = $("#dot-text-input").value.trim();
     closeDotPopup();
+    scheduleAutoSave();
     showToast("Pin notes saved");
   }
 
@@ -827,23 +821,36 @@
       setTimeout(() => el.remove(), 300);
     }
     closeDotPopup();
+    scheduleAutoSave();
     showToast("Pin removed");
   }
 
-  /* ── Mode & Tool Switching ────────────────────────────── */
+  /* ── 3-Mode Switching: View | Edit | JSON ─────────────── */
   function setMode(mode) {
     state.mode = mode;
     $$(".mode-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
-    const toggle = $(".mode-toggle");
-    toggle.classList.toggle("edit-active", mode === "edit");
+
+    const modeIndex = mode === "view" ? "0" : mode === "edit" ? "1" : "2";
+    $("#mode-toggle").dataset.activeIndex = modeIndex;
+
     editPanel.classList.toggle("hidden", mode !== "edit");
+    jsonPortalPanel.classList.toggle("hidden", mode !== "json");
     mapContainer.classList.toggle("panel-open", mode === "edit");
+    mapContainer.classList.toggle("json-open", mode === "json");
+
+    if (mode === "json") {
+      renderPortalJsonEditorFromState();
+    }
 
     updateCanvasInteractivity();
     updateZoomState();
     closeDotPopup();
 
     setTimeout(() => {
+      initProjection();
+      const g = d3.select("#map-g");
+      g.selectAll(".country").attr("d", state.path);
+      g.selectAll(".graticule").attr("d", state.path);
       resizeCanvas();
       repositionDots();
     }, 360);
@@ -886,12 +893,174 @@
     }
   }
 
+  /* ═══════════════════════════════════════════════════════════
+     Built-In Web Portal JSON Editor (Full Map JSON in Browser)
+     ═══════════════════════════════════════════════════════════ */
+
+  function renderPortalJsonEditorFromState() {
+    const doc = serializeStateToMapDocument(state.currentMapName);
+    const displayDoc = {
+      _guide: FILE_GUIDE,
+      formatVersion: 2,
+      id: state.currentMapId || slugifyPreview(state.currentMapName),
+      name: doc.name,
+      settings: doc.settings,
+      colorPalette: doc.colorPalette,
+      countries: doc.countries,
+      pins: doc.pins,
+      freehandStrokes: doc.freehandStrokes,
+    };
+
+    const textarea = $("#portal-json-textarea");
+    textarea.value = JSON.stringify(displayDoc, null, 2);
+    state.portalJsonDirty = false;
+    $("#portal-json-filename").textContent = state.currentMapFile
+      ? `data/maps/${state.currentMapFile}`
+      : `data/maps/${slugifyPreview(state.currentMapName)}.json (unsaved)`;
+    validatePortalJsonTextarea();
+  }
+
+  function validatePortalJsonTextarea() {
+    const raw = $("#portal-json-textarea").value.trim();
+    const statusEl = $("#portal-json-status");
+    try {
+      const parsed = JSON.parse(raw);
+      if (!isPlainObject(parsed)) {
+        statusEl.textContent = "✗ Root must be { … }";
+        statusEl.className = "json-status invalid";
+        return { ok: false, error: "Root value must be a JSON object" };
+      }
+      statusEl.textContent = state.portalJsonDirty ? "● Valid (unapplied)" : "✓ Valid JSON";
+      statusEl.className = "json-status valid";
+      return { ok: true, value: parsed };
+    } catch (err) {
+      statusEl.textContent = `✗ ${err.message}`;
+      statusEl.className = "json-status invalid";
+      return { ok: false, error: err.message };
+    }
+  }
+
+  function focusCountryInPortalTextarea(countryName) {
+    const textarea = $("#portal-json-textarea");
+    const needle = `"${countryName}":`;
+    const idx = textarea.value.indexOf(needle);
+    if (idx === -1) return false;
+
+    textarea.focus();
+    textarea.setSelectionRange(idx, idx + needle.length);
+    const linesBefore = textarea.value.slice(0, idx).split("\n").length;
+    const lineHeight = 19.5;
+    textarea.scrollTop = Math.max(0, (linesBefore - 4) * lineHeight);
+    return true;
+  }
+
+  function insertOrJumpCountryInPortalJson() {
+    const rawInput = $("#portal-country-input").value.trim();
+    if (!rawInput) {
+      showToast("Pick or type a country name first");
+      $("#portal-country-input").focus();
+      return;
+    }
+
+    const entry = resolveOrCreateCountryEntry(rawInput);
+    if (!entry) return;
+
+    const check = validatePortalJsonTextarea();
+    if (!check.ok) {
+      showToast("Fix the current JSON syntax error before inserting a country");
+      $("#portal-json-textarea").focus();
+      return;
+    }
+
+    const doc = check.value;
+    if (!isPlainObject(doc.countries)) {
+      doc.countries = {};
+    }
+
+    const existingKey = Object.keys(doc.countries).find(
+      (k) => k.toLowerCase() === entry.name.toLowerCase()
+    );
+
+    if (!existingKey) {
+      doc.countries[entry.name] = {
+        color: serializeColorValue(state.color) || "Crimson",
+        data: {
+          dishes: [{ name: "Example Dish", tried: false }],
+        },
+      };
+
+      // Keep countries sorted alphabetically by name
+      const sorted = {};
+      Object.keys(doc.countries)
+        .sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+        .forEach((k) => {
+          sorted[k] = doc.countries[k];
+        });
+      doc.countries = sorted;
+
+      $("#portal-json-textarea").value = JSON.stringify(doc, null, 2);
+      state.portalJsonDirty = true;
+      validatePortalJsonTextarea();
+      showToast(`Inserted "${entry.name}" — click Apply & Save JSON (or Ctrl+S)`);
+    }
+
+    zoomToCountry(entry.id, false);
+    focusCountryInPortalTextarea(existingKey || entry.name);
+  }
+
+  async function applyAndSavePortalJson() {
+    const check = validatePortalJsonTextarea();
+    if (!check.ok) {
+      showToast(`Invalid JSON: ${check.error}`);
+      $("#portal-json-textarea").focus();
+      return;
+    }
+
+    const parsedDoc = check.value;
+    const mapName = String(parsedDoc.name || state.currentMapName || "Untitled Map").trim() || "Untitled Map";
+    parsedDoc.name = mapName;
+
+    try {
+      setSyncStatus("saving", "Saving…");
+      const isUpdate = Boolean(state.currentMapId);
+      const method = isUpdate ? "PUT" : "POST";
+      const url = isUpdate
+        ? `/api/maps/${encodeURIComponent(state.currentMapId)}`
+        : "/api/maps";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsedDoc),
+      });
+      const result = await res.json();
+
+      if (res.ok && result.success && result.map) {
+        state.portalJsonDirty = false;
+        applyLoadedMapObject(result.map);
+        renderPortalJsonEditorFromState();
+        setSyncStatus("saved", "✓ Synced");
+        showToast(`Applied & saved to data/maps/${result.fileName}`);
+      } else {
+        setSyncStatus("unsaved", "● Save error");
+        showToast(result.error || "Failed to save JSON");
+      }
+    } catch (err) {
+      console.error(err);
+      // Even if server is unreachable, still render onto map in browser
+      applyLoadedMapObject(parsedDoc);
+      setSyncStatus("unsaved", "● Offline");
+      showToast("Rendered JSON on map (server unreachable)");
+    }
+  }
+
   /* ── Color Palette ────────────────────────────────────── */
   function buildPalette() {
     const container = $("#color-palette");
     container.innerHTML = "";
     COLORS.forEach((c, i) => {
       const swatch = document.createElement("button");
+      swatch.type = "button";
       swatch.className = "color-swatch" + (i === 0 ? " active" : "");
       swatch.style.background = c.hex;
       swatch.title = c.name;
@@ -902,7 +1071,6 @@
     });
     updateActiveColorDisplay();
 
-    // Build mini swatches inside Country JSON Modal
     const modalSwatches = $("#country-modal-swatches");
     modalSwatches.innerHTML = "";
     COLORS.forEach((c) => {
@@ -913,8 +1081,7 @@
       mini.title = c.name;
       mini.dataset.color = c.hex;
       mini.addEventListener("click", () => {
-        modalState.workingColor =
-          modalState.workingColor === c.hex ? null : c.hex;
+        modalState.workingColor = modalState.workingColor === c.hex ? null : c.hex;
         syncModalColorSwatches();
       });
       modalSwatches.appendChild(mini);
@@ -1032,7 +1199,6 @@
     const translate = [w / 2 - scale * cx, h / 2 - scale * cy];
 
     const t = d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale);
-
     state._svg.transition().duration(750).call(state._zoom.transform, t);
 
     const el = mapSvg.querySelector(`.country[data-id="${CSS.escape(String(id))}"]`);
@@ -1043,7 +1209,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════════
-     Country JSON Modal (Interactive Checklist + Raw JSON)
+     Per-Country JSON Modal (Interactive Checklist + Raw JSON)
      ═══════════════════════════════════════════════════════════ */
 
   function detectChecklistLabelKey(items) {
@@ -1188,7 +1354,7 @@
     if (keys.length === 0) {
       const emptyDiv = document.createElement("div");
       emptyDiv.className = "interactive-empty";
-      emptyDiv.innerHTML = `No JSON data stored for <strong></strong> yet.<br/>Use <strong>+ Dish Checklist</strong> below, add a custom field, or switch to <strong>Raw JSON</strong>.`;
+      emptyDiv.innerHTML = `No JSON data stored for <strong></strong> yet.<br/>Use <strong>+ Dish Checklist</strong> below, add a custom field, or switch to <strong>Country JSON</strong>.`;
       emptyDiv.querySelector("strong").textContent = modalState.countryName;
       container.appendChild(emptyDiv);
       return;
@@ -1221,7 +1387,6 @@
 
       header.appendChild(keyBadge);
 
-      // 1. Checklist Array (e.g., dishes: [{ name: "Ramen", tried: true }])
       if (isChecklistArray(val)) {
         const labelKey = detectChecklistLabelKey(val);
         const boolKey = detectChecklistBoolKey(val) || "tried";
@@ -1272,7 +1437,6 @@
           row.appendChild(toggleBtn);
           row.appendChild(nameInput);
 
-          // Indicate if extra properties exist on this object
           const extraKeys = Object.keys(item).filter((k) => k !== labelKey && k !== boolKey);
           if (extraKeys.length > 0) {
             const extraBadge = document.createElement("span");
@@ -1310,9 +1474,7 @@
           );
         });
         card.appendChild(addItemBtn);
-      }
-      // 2. Boolean Map Object (e.g., { "Sushi": true, "Ramen": false })
-      else if (isBooleanMapObject(val)) {
+      } else if (isBooleanMapObject(val)) {
         const entries = Object.entries(val);
         const trueCount = entries.filter(([, b]) => b).length;
 
@@ -1393,9 +1555,7 @@
           renderInteractiveEditor(`[data-focus-id="bmap-${CSS.escape(key)}-${idx}"]`);
         });
         card.appendChild(addEntryBtn);
-      }
-      // 3. Primitive Boolean
-      else if (typeof val === "boolean") {
+      } else if (typeof val === "boolean") {
         headerRight.appendChild(deleteFieldBtn);
         header.appendChild(headerRight);
         card.appendChild(header);
@@ -1410,9 +1570,7 @@
           renderInteractiveEditor();
         });
         card.appendChild(toggleBtn);
-      }
-      // 4. Primitive Number or String
-      else if (typeof val === "string" || typeof val === "number") {
+      } else if (typeof val === "string" || typeof val === "number") {
         headerRight.appendChild(deleteFieldBtn);
         header.appendChild(headerRight);
         card.appendChild(header);
@@ -1433,9 +1591,7 @@
           }
         });
         card.appendChild(input);
-      }
-      // 5. Primitive / Empty Array
-      else if (isPrimitiveArray(val)) {
+      } else if (isPrimitiveArray(val)) {
         headerRight.appendChild(deleteFieldBtn);
         header.appendChild(headerRight);
         card.appendChild(header);
@@ -1499,13 +1655,11 @@
         }
 
         card.appendChild(btnRow);
-      }
-      // 6. Arbitrary Nested JSON Object / Mixed Array
-      else {
+      } else {
         const editRawBtn = document.createElement("button");
         editRawBtn.type = "button";
         editRawBtn.className = "mini-btn";
-        editRawBtn.textContent = "Edit in Raw JSON →";
+        editRawBtn.textContent = "Edit in Country JSON →";
         editRawBtn.addEventListener("click", () => switchEditorTab("raw"));
 
         headerRight.appendChild(editRawBtn);
@@ -1620,8 +1774,6 @@
 
     const id = modalState.countryId;
     const countryName = modalState.countryName;
-
-    // Clean empty trailing unnamed items ONLY if completely blank? Keep user data as entered
     const finalData = deepClone(modalState.workingData);
 
     if (modalState.workingColor) {
@@ -1639,53 +1791,39 @@
     refreshMapCountryStyles();
     closeCountryModal();
 
-    // If a map file from data/maps/ is currently loaded, persist immediately
     if (state.currentMapId) {
       try {
-        if (state.loadedFormatVersion < 2) {
-          // Upgrade legacy v1 map to v2 format in full so numeric countryFills are migrated
-          const payload = serializeStateToMapDocument(state.currentMapName);
-          const putRes = await fetch(`/api/maps/${encodeURIComponent(state.currentMapId)}`, {
-            method: "PUT",
+        setSyncStatus("saving", "Saving…");
+        const res = await fetch(
+          `/api/maps/${encodeURIComponent(state.currentMapId)}/countries/${encodeURIComponent(countryName)}`,
+          {
+            method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          const putResult = await putRes.json();
-          if (putRes.ok && putResult.success) {
-            state.currentMapId = putResult.id;
-            state.currentMapFile = putResult.fileName;
-            state.loadedFormatVersion = 2;
-            updateActiveMapBanner();
-            showToast(`Saved ${countryName} & upgraded to data/maps/${putResult.fileName}`);
-          } else {
-            showToast(putResult.error || `Saved ${countryName} locally`);
+            body: JSON.stringify({
+              color: serializeColorValue(modalState.workingColor),
+              data: finalData,
+            }),
           }
+        );
+        const result = await res.json();
+        if (res.ok && result.success && result.map) {
+          applyLoadedMapObject(result.map);
+          refreshPortalJsonFromStateIfClean();
+          setSyncStatus("saved", "✓ Synced");
+          showToast(`Saved ${countryName} to data/maps/${result.fileName}`);
         } else {
-          const res = await fetch(
-            `/api/maps/${encodeURIComponent(state.currentMapId)}/countries/${encodeURIComponent(countryName)}`,
-            {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                color: serializeColorValue(modalState.workingColor),
-                data: finalData,
-              }),
-            }
-          );
-          const result = await res.json();
-          if (res.ok && result.success && result.map) {
-            applyLoadedMapObject(result.map);
-            showToast(`Saved ${countryName} to data/maps/${result.fileName}`);
-          } else {
-            showToast(result.error || `Saved ${countryName} locally`);
-          }
+          setSyncStatus("unsaved", "● Save error");
+          showToast(result.error || `Saved ${countryName} locally`);
         }
       } catch (err) {
         console.error(err);
-        showToast(`Saved ${countryName} in app (failed to reach server)`);
+        setSyncStatus("unsaved", "● Offline");
+        showToast(`Saved ${countryName} in browser`);
       }
     } else {
-      showToast(`Saved ${countryName} JSON (press Ctrl+S to save map file)`);
+      setSyncStatus("unsaved", "● Unsaved");
+      refreshPortalJsonFromStateIfClean();
+      showToast(`Updated ${countryName} (press Ctrl+S to create map file)`);
     }
   }
 
@@ -1707,7 +1845,7 @@
     }
   }
 
-  /* ── Country Data Overview Modal (Top Bar "{ }" Button) ─ */
+  /* ── Country Data Directory Modal ─────────────────────── */
   function openDataOverviewModal() {
     $("#data-overview-modal").classList.remove("hidden");
     $("#data-overview-backdrop").classList.remove("hidden");
@@ -1738,7 +1876,7 @@
     if (candidates.length === 0) {
       listEl.innerHTML = q
         ? `<p class="db-helper-note">No matching country found. Press Enter to add "${query.trim()}" as a custom entry.</p>`
-        : `<p class="db-helper-note">No countries have JSON data yet. Type a country name above or click any country on the map!</p>`;
+        : `<p class="db-helper-note">No countries have custom JSON data yet. Type a country name above or click any country on the map.</p>`;
       return;
     }
 
@@ -1774,7 +1912,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════════
-     v2 Serialization & Deserialization (with v1 Compatibility)
+     v2 JSON Document Serialization & Deserialization
      ═══════════════════════════════════════════════════════════ */
 
   function serializeStateToMapDocument(mapName) {
@@ -1857,15 +1995,14 @@
       }
     }
 
-    state.currentMapId = doc.id || state.currentMapId;
+    if (doc.id) state.currentMapId = doc.id;
     state.currentMapName = doc.name || state.currentMapId || "Untitled Map";
-    state.currentMapFile = doc.fileName || (state.currentMapId ? `${state.currentMapId}.json` : null);
-    state.loadedFormatVersion = Number(doc.formatVersion || (doc.countries ? 2 : 1));
+    state.currentMapFile =
+      doc.fileName || (state.currentMapId ? `${state.currentMapId}.json` : null);
 
     const nextFills = {};
     const nextData = {};
 
-    // 1. Legacy v1 countryFills support
     if (isPlainObject(doc.countryFills)) {
       for (const [rawKey, rawColor] of Object.entries(doc.countryFills)) {
         const entry = resolveOrCreateCountryEntry(rawKey);
@@ -1876,7 +2013,6 @@
       }
     }
 
-    // 2. Human-editable v2 countries dictionary support (including shorthand/offline edits)
     if (isPlainObject(doc.countries)) {
       for (const [rawCountryKey, rawRecord] of Object.entries(doc.countries)) {
         const entry = resolveOrCreateCountryEntry(rawCountryKey);
@@ -1908,7 +2044,6 @@
             }
           }
 
-          // Also pick up any extra keys written directly on the country object offline
           for (const [k, v] of Object.entries(rawRecord)) {
             if (k !== "color" && k !== "data") {
               extractedData[k] = deepClone(v);
@@ -1925,7 +2060,6 @@
     state.countryFills = nextFills;
     state.countryData = nextData;
 
-    // Opacity
     const loadedOpacity =
       typeof doc.settings?.fillOpacity === "number"
         ? doc.settings.fillOpacity
@@ -1934,7 +2068,6 @@
           : 0.55;
     state.fillOpacity = Math.min(1, Math.max(0.1, loadedOpacity));
 
-    // Pins / Dots
     const rawPins = Array.isArray(doc.pins)
       ? doc.pins
       : Array.isArray(doc.dots)
@@ -1965,7 +2098,6 @@
       })
       .filter(Boolean);
 
-    // Freehand Strokes
     const rawStrokes = Array.isArray(doc.freehandStrokes)
       ? doc.freehandStrokes
       : Array.isArray(doc.strokes)
@@ -1982,7 +2114,6 @@
     }));
     state.undoneStrokes = [];
 
-    // Update UI & URL
     refreshMapCountryStyles();
     redrawCanvas();
     renderAllDots();
@@ -1992,23 +2123,24 @@
   }
 
   function updateActiveMapBanner() {
-    const pill = $("#active-map-pill");
+    $("#active-map-label").textContent = state.currentMapName;
     if (state.currentMapId) {
-      pill.classList.remove("hidden");
-      $("#active-map-label").textContent = state.currentMapName;
-      $("#active-map-file").textContent = `data/maps/${state.currentMapFile || state.currentMapId + ".json"}`;
+      const file = state.currentMapFile || `${state.currentMapId}.json`;
+      $("#active-map-file").textContent = `data/maps/${file}`;
+      $("#btn-reload-disk").style.display = "";
       const url = new URL(window.location.href);
       url.searchParams.set("map", state.currentMapId);
       window.history.replaceState(null, "", url.toString());
     } else {
-      pill.classList.add("hidden");
+      $("#active-map-file").textContent = "unsaved";
+      $("#btn-reload-disk").style.display = "none";
       const url = new URL(window.location.href);
       url.searchParams.delete("map");
       window.history.replaceState(null, "", url.toString());
     }
   }
 
-  /* ── Database Save / Load / Reload ────────────────────── */
+  /* ── Save / Switch / Reload Map JSON Files ────────────── */
   function updateSavePreview() {
     const typed = $("#save-map-name").value.trim();
     const slug = slugifyPreview(typed || state.currentMapName || "untitled-map");
@@ -2025,7 +2157,7 @@
     $("#save-map-name").value =
       state.currentMapName === "Untitled Map" ? "" : state.currentMapName;
     $("#save-btn-copy").classList.toggle("hidden", !state.currentMapId);
-    $("#save-btn-label").textContent = state.currentMapId ? "Save Changes" : "Save Map";
+    $("#save-btn-label").textContent = state.currentMapId ? "Save Changes" : "Create Map File";
     updateSavePreview();
     $("#save-map-name").focus();
   }
@@ -2040,7 +2172,7 @@
     const payload = serializeStateToMapDocument(name);
 
     try {
-      showToast("Saving map file...");
+      setSyncStatus("saving", "Saving…");
       const isUpdate = Boolean(state.currentMapId) && !saveAsNewCopy;
       const method = isUpdate ? "PUT" : "POST";
       const url = isUpdate
@@ -2058,14 +2190,19 @@
         state.currentMapId = result.id;
         state.currentMapName = result.name || name;
         state.currentMapFile = result.fileName || `${result.id}.json`;
+        if (result.map) applyLoadedMapObject(result.map);
         updateActiveMapBanner();
+        setSyncStatus("saved", "✓ Synced");
+        refreshPortalJsonFromStateIfClean();
         closeSaveModal();
         showToast(`Saved to data/maps/${state.currentMapFile}`);
       } else {
+        setSyncStatus("unsaved", "● Save error");
         showToast(result.error || "Failed to save map.");
       }
     } catch (err) {
       console.error(err);
+      setSyncStatus("unsaved", "● Offline");
       showToast("Error saving map.");
     }
   }
@@ -2077,7 +2214,7 @@
     container.innerHTML = `<p class="db-helper-note">Loading maps from data/maps/…</p>`;
 
     try {
-      const res = await fetch("/api/maps");
+      const res = await fetch("/api/maps", { cache: "no-store" });
       const maps = await res.json();
 
       if (!Array.isArray(maps) || maps.length === 0) {
@@ -2098,7 +2235,7 @@
 
         const nameSpan = document.createElement("span");
         nameSpan.className = "db-map-name";
-        nameSpan.textContent = map.name;
+        nameSpan.textContent = map.name + (map.id === state.currentMapId ? " (active)" : "");
 
         const fileSpan = document.createElement("code");
         fileSpan.className = "db-map-file";
@@ -2143,9 +2280,7 @@
             });
             if (delRes.ok) {
               if (state.currentMapId === map.id) {
-                state.currentMapId = null;
-                state.currentMapFile = null;
-                updateActiveMapBanner();
+                resetToBlankCanvas();
               }
               showToast(`Deleted ${map.name}`);
               openDbModal();
@@ -2161,7 +2296,7 @@
         item.appendChild(delBtn);
         container.appendChild(item);
       });
-    } catch (err) {
+    } catch {
       container.innerHTML = `<p class="db-map-error">Failed to load maps from server.</p>`;
     }
   }
@@ -2173,7 +2308,6 @@
 
   async function loadMapFromDb(id, silentToast = false) {
     try {
-      if (!silentToast) showToast("Loading map from disk...");
       const res = await fetch(`/api/maps/${encodeURIComponent(id)}`, {
         cache: "no-store",
       });
@@ -2184,7 +2318,12 @@
         return false;
       }
 
+      state.portalJsonDirty = false;
       applyLoadedMapObject(data);
+      setSyncStatus("saved", "✓ Synced");
+      if (state.mode === "json") {
+        renderPortalJsonEditorFromState();
+      }
       closeDbModal();
       if (!silentToast) {
         showToast(`Loaded ${data.name} (data/maps/${state.currentMapFile})`);
@@ -2199,17 +2338,58 @@
 
   async function reloadCurrentMapFromDisk() {
     if (!state.currentMapId) return;
+    if (
+      state.mode === "json" &&
+      state.portalJsonDirty &&
+      !confirm("Discard unapplied edits in the JSON panel and reload from disk?")
+    ) {
+      return;
+    }
     const ok = await loadMapFromDb(state.currentMapId, true);
     if (ok) {
-      showToast(`Reloaded latest changes from data/maps/${state.currentMapFile}`);
+      showToast(`Reloaded latest JSON from data/maps/${state.currentMapFile}`);
     }
   }
+
+  function resetToBlankCanvas() {
+    clearTimeout(autoSaveTimer);
+    state.countryFills = {};
+    state.countryData = {};
+    state.customPalette = {};
+    state.strokes = [];
+    state.undoneStrokes = [];
+    state.dots = [];
+    state.currentMapId = null;
+    state.currentMapName = "Untitled Map";
+    state.currentMapFile = null;
+    state.portalJsonDirty = false;
+
+    refreshMapCountryStyles();
+    redrawCanvas();
+    renderAllDots();
+    updateActiveMapBanner();
+    setSyncStatus("unsaved", "● Unsaved");
+    if (state.mode === "json") {
+      renderPortalJsonEditorFromState();
+    }
+  }
+
+  function clearAll() {
+    if (!confirm("Start a new blank map canvas? (Existing files in data/maps/ will not be deleted.)")) {
+      return;
+    }
+    resetToBlankCanvas();
+    showToast("Started new blank map — press Ctrl+S to save a new JSON file");
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     Share Snapshot Export ONLY (One-Time On-Demand JPEG Export)
+     ═══════════════════════════════════════════════════════════ */
 
   function sanitizeName(name) {
     return name.replace(/[<>:"/\\|?*]/g, "_").replace(/\s+/g, "_").replace(/^_|_$/g, "");
   }
 
-  /* ── Render Map to Canvas & Export JPEG ───────────────── */
   function renderMapToCanvas() {
     return new Promise((resolve) => {
       const rect = mapContainer.getBoundingClientRect();
@@ -2274,18 +2454,12 @@
     });
   }
 
-  function canvasToJpegBlob(canvas, quality) {
-    return new Promise((resolve) => {
-      canvas.toBlob(resolve, "image/jpeg", quality || 0.92);
-    });
-  }
-
-  async function exportAsImage() {
-    showToast("Rendering JPEG...");
+  async function shareExportAsImage() {
+    showToast("Exporting JPEG snapshot for sharing…");
     try {
       const canvas = await renderMapToCanvas();
-      const blob = await canvasToJpegBlob(canvas, 0.92);
-      const safeName = sanitizeName(state.currentMapName || "Untitled_Map");
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+      const safeName = sanitizeName(state.currentMapName || "World_Map");
       const filename = `${safeName}.jpeg`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -2293,31 +2467,10 @@
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-      showToast(`Downloaded ${filename}`);
+      showToast(`Exported snapshot: ${filename}`);
     } catch {
-      showToast("Failed to export JPEG");
+      showToast("Failed to export snapshot");
     }
-  }
-
-  function clearAll() {
-    if (!confirm("Clear all paintings, country fills, country JSON data, and pins from the canvas?")) {
-      return;
-    }
-    state.countryFills = {};
-    state.countryData = {};
-    state.customPalette = {};
-    state.strokes = [];
-    state.undoneStrokes = [];
-    state.dots = [];
-    state.currentMapId = null;
-    state.currentMapName = "Untitled Map";
-    state.currentMapFile = null;
-
-    refreshMapCountryStyles();
-    redrawCanvas();
-    renderAllDots();
-    updateActiveMapBanner();
-    showToast("Canvas cleared");
   }
 
   /* ── Toast ────────────────────────────────────────────── */
@@ -2332,8 +2485,10 @@
 
   /* ── Wire Up Events ───────────────────────────────────── */
   function wireEvents() {
+    // 3-way Mode Toggle
     $("#btn-view-mode").addEventListener("click", () => setMode("view"));
     $("#btn-edit-mode").addEventListener("click", () => setMode("edit"));
+    $("#btn-json-mode").addEventListener("click", () => setMode("json"));
 
     $$(".tool-btn").forEach((btn) =>
       btn.addEventListener("click", () => setTool(btn.dataset.tool))
@@ -2348,18 +2503,74 @@
       state.fillOpacity = parseInt(e.target.value, 10) / 100;
       $("#fill-opacity-value").textContent = e.target.value + "%";
       refreshMapCountryStyles();
+      scheduleAutoSave();
     });
 
     $("#btn-undo").addEventListener("click", undo);
     $("#btn-redo").addEventListener("click", redo);
 
     // Top bar actions
+    $("#btn-switch-map").addEventListener("click", openDbModal);
     $("#btn-country-data-list").addEventListener("click", openDataOverviewModal);
     $("#btn-reload-disk").addEventListener("click", reloadCurrentMapFromDisk);
-    $("#btn-save").addEventListener("click", openSaveModal);
+    $("#btn-save").addEventListener("click", () => {
+      if (state.mode === "json") {
+        applyAndSavePortalJson();
+      } else {
+        openSaveModal();
+      }
+    });
     $("#btn-load").addEventListener("click", openDbModal);
-    $("#btn-export").addEventListener("click", exportAsImage);
+    $("#btn-share").addEventListener("click", shareExportAsImage);
     $("#btn-clear-all").addEventListener("click", clearAll);
+
+    // Web Portal JSON Panel events
+    const portalTextarea = $("#portal-json-textarea");
+    portalTextarea.addEventListener("input", () => {
+      state.portalJsonDirty = true;
+      validatePortalJsonTextarea();
+    });
+    portalTextarea.addEventListener("keydown", (e) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const start = portalTextarea.selectionStart;
+        const end = portalTextarea.selectionEnd;
+        portalTextarea.value =
+          portalTextarea.value.substring(0, start) +
+          "  " +
+          portalTextarea.value.substring(end);
+        portalTextarea.selectionStart = portalTextarea.selectionEnd = start + 2;
+        state.portalJsonDirty = true;
+        validatePortalJsonTextarea();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        applyAndSavePortalJson();
+      }
+    });
+
+    $("#btn-portal-format").addEventListener("click", () => {
+      const check = validatePortalJsonTextarea();
+      if (check.ok) {
+        portalTextarea.value = JSON.stringify(check.value, null, 2);
+      } else {
+        showToast("Fix JSON syntax error before formatting");
+      }
+    });
+    $("#btn-portal-reload").addEventListener("click", () => {
+      if (state.currentMapId) {
+        reloadCurrentMapFromDisk();
+      } else {
+        renderPortalJsonEditorFromState();
+      }
+    });
+    $("#btn-portal-apply").addEventListener("click", applyAndSavePortalJson);
+    $("#btn-portal-insert-country").addEventListener("click", insertOrJumpCountryInPortalJson);
+    $("#portal-country-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        insertOrJumpCountryInPortalJson();
+      }
+    });
 
     // Save Modal
     $("#save-modal-close").addEventListener("click", closeSaveModal);
@@ -2374,6 +2585,11 @@
     // Database Modal
     $("#db-modal-close").addEventListener("click", closeDbModal);
     $("#db-modal-backdrop").addEventListener("click", closeDbModal);
+    $("#btn-db-new-map").addEventListener("click", () => {
+      closeDbModal();
+      resetToBlankCanvas();
+      openSaveModal();
+    });
 
     // Country Data Directory Modal
     $("#data-overview-close").addEventListener("click", closeDataOverviewModal);
@@ -2394,7 +2610,7 @@
       }
     });
 
-    // Country JSON Modal
+    // Per-Country JSON Modal
     $("#country-modal-close").addEventListener("click", closeCountryModal);
     $("#country-modal-backdrop").addEventListener("click", closeCountryModal);
     $("#country-btn-cancel").addEventListener("click", closeCountryModal);
@@ -2423,7 +2639,6 @@
       pill.addEventListener("click", () => applyQuickTemplate(pill.dataset.template));
     });
 
-    // Raw JSON Editor helpers
     const rawTextarea = $("#country-json-textarea");
     rawTextarea.addEventListener("input", updateRawJsonValidationUI);
     rawTextarea.addEventListener("keydown", (e) => {
@@ -2480,13 +2695,19 @@
         e.preventDefault();
         if (modalState.isOpen) {
           saveCountryModal();
+        } else if (state.mode === "json") {
+          applyAndSavePortalJson();
         } else {
           openSaveModal();
         }
         return;
       }
 
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") {
+      if (
+        e.target.tagName === "INPUT" ||
+        e.target.tagName === "TEXTAREA" ||
+        e.target.tagName === "SELECT"
+      ) {
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
@@ -2499,7 +2720,6 @@
       }
     });
 
-    // Pin popup
     $("#dot-popup-close").addEventListener("click", closeDotPopup);
     $("#dot-save-btn").addEventListener("click", saveDot);
     $("#dot-delete-btn").addEventListener("click", deleteDot);
@@ -2516,10 +2736,37 @@
     });
   }
 
-  /* ── Initialization ───────────────────────────────────── */
+  /* ── Initialization Pipeline ──────────────────────────── */
+  async function loadInitialMapFromServer() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedId = urlParams.get("map");
+    if (requestedId) {
+      const loaded = await loadMapFromDb(requestedId, true);
+      if (loaded) return;
+    }
+
+    // Automatically load most recent valid map from data/maps/ on startup
+    try {
+      const res = await fetch("/api/maps", { cache: "no-store" });
+      if (!res.ok) return;
+      const maps = await res.json();
+      const latestValid = Array.isArray(maps)
+        ? maps.find((m) => !m.invalidJson)
+        : null;
+      if (latestValid) {
+        await loadMapFromDb(latestValid.id, true);
+      } else {
+        updateActiveMapBanner();
+        setSyncStatus("unsaved", "● Unsaved");
+      }
+    } catch {
+      updateActiveMapBanner();
+    }
+  }
+
   async function init() {
     initProjection();
-    const countries = await loadWorldData();
+    const countries = await loadCatalogAndWorldData();
     renderMap(countries);
     resizeCanvas();
     setupCanvasEvents();
@@ -2529,12 +2776,7 @@
     setTool("country-fill");
     updateCountryDataIndicators();
 
-    // Auto-load map if ?map=<id> is in URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const initialMapId = urlParams.get("map");
-    if (initialMapId) {
-      await loadMapFromDb(initialMapId, true);
-    }
+    await loadInitialMapFromServer();
 
     loadingScreen.classList.add("fade-out");
     setTimeout(() => loadingScreen.remove(), 600);

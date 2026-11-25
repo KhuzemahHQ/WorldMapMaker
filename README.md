@@ -1,50 +1,51 @@
 # 🌍 World Map Maker
 
-An interactive world map application for painting, annotating, storing structured per-country JSON data, and exploring. Color countries, maintain per-country checklists or custom JSON objects (both in-app and offline in `data/maps/`), draw freehand across borders, place annotated pins, and export maps as high-resolution JPEG images.
+A 100% code-driven interactive world map application with a built-in **Web JSON Portal** and offline human-editable JSON storage. Maps are stored purely as structured JSON files in `data/maps/` and rendered live via D3.js & SVG; raster JPEG snapshots are only generated on demand when clicking the **Share** icon.
 
 ![World Map Maker](https://img.shields.io/badge/Made_with-Node.js_%26_Vanilla_JS-F7DF1E?style=for-the-badge&logo=javascript)
 ![D3.js](https://img.shields.io/badge/D3.js-v7-F9A03C?style=for-the-badge&logo=d3.js)
 
 ---
 
-## ✨ Features
+## 🔄 Data & Rendering Pipeline
 
-### `{ }` Per-Country JSON Data (In-App & Offline)
-Attach arbitrary JSON objects to any country — such as culinary checklists (`tried: true/false`), travel logs, language notes, or custom metadata:
-- **Interactive View**: Visual editor with one-click `✓ tried` / `○ not tried` checklist toggles, boolean maps, custom fields, and starter templates (`+ Dish Checklist`, `+ Boolean Map`, `+ Notes`).
-- **Raw JSON View**: Built-in monospace JSON editor with live syntax validation, `Tab` indentation, and `Prettify` formatting.
-- **Quick Access Anywhere**:
-  - **View Mode**: Click any country on the map to inspect or update its JSON data.
-  - **Edit Mode**: Select the **Country JSON Data** tool, **right-click** any country at any time, or click `{ }` next to a country in search results.
-  - **Top Bar `{ }` Directory**: Browse and filter all countries with stored JSON data.
-- **Seamless Offline Editing**: Maps are saved as clean, human-readable `.json` files in `data/maps/`. Edit them in any text editor and click the `↻` reload icon (or refresh the page) to see updates immediately.
+Everything rendered on screen comes directly from JSON data — no screenshots or images are ever used to persist or render maps:
 
-### 🎨 Country Fill
-Click any country in Edit Mode (`Fill` tool) to color it with one of 10 palette colors. Click again with the same color to clear the fill. Adjust fill opacity dynamically.
+```text
+data/country-catalog.json  ──┐
+                             ├──► Express API (server.js) ◄──► Web Portal (D3 SVG Map + Live JSON Editor)
+data/maps/<map-name>.json  ──┘                                          │
+                                                                 [Share Icon Click]
+                                                                        ▼
+                                                             One-time .jpeg Download
+```
 
-### 🖌️ Freehand Paint & Eraser
-Draw freely across country borders with an adjustable brush (`2px`–`40px`), undo/redo history, and eraser tool.
-
-### 📍 Location Pins
-Drop coordinate pins anywhere on the map with titles and notes.
-
-### 📸 JPEG Export
-Export your rendered map (fills, freehand strokes, and pins) as a crisp JPEG image.
+1. **Country Catalog (`data/country-catalog.json`)**: Shared canonical dictionary mapping world TopoJSON feature IDs and common aliases (`"USA"`, `"UK"`, `"UAE"`, `"South Korea"`, etc.) to human-readable **Country Names** (`GET /api/catalog`).
+2. **Map JSON Files (`data/maps/*.json`)**: Single source of truth for each map (`GET/POST/PUT/PATCH /api/maps`). On page load, the web portal automatically fetches `/api/maps` and renders your active/latest map (such as `data/maps/culinary.json`).
+3. **Live Code Rendering**: Country polygons, fills, pins, and vector stroke coordinates render dynamically in the browser. Edits made in-app automatically sync back to `data/maps/<map>.json`, and offline file edits load immediately on refresh or clicking `↻`.
+4. **Share Snapshot Export**: Clicking the **Share** icon in the top bar renders a one-time `.jpeg` download for sharing externally.
 
 ---
 
-## 📂 Human-Editable Data Format (`formatVersion: 2`)
+## ✨ Three Modes in the Web Portal
 
-Each saved map lives in `data/maps/<map-slug>.json` (for example, `data/maps/culinary.json`) with self-explanatory keys:
+Use the top-bar toggle to switch between **View**, **Edit**, and **JSON**:
 
-- **Readable filenames**: Derived from your map name (`Culinary` → `data/maps/culinary.json`).
-- **Country names as keys**: Countries are listed alphabetically by name (`"Italy"`, `"Japan"`, `"Mexico"`), with automatic support for common aliases (`"USA"`, `"UK"`, `"UAE"`, `"South Korea"`, etc.) when editing offline.
-- **Named or custom colors**: Set `"color"` to any palette name (`"Crimson"`, `"Emerald"`, `"Sunflower"`, etc.), any CSS hex code (`"#10b981"`), or `null` if uncolored.
-- **Flexible `"data"` object**: Store any valid JSON object per country.
+| Mode | What It Does |
+|------|--------------|
+| **View** | Pan & zoom the SVG map. Click any country to open its interactive checklist (`✓ tried` / `○ not tried`) or per-country JSON modal. |
+| **Edit** | Opens the visual tools sidebar: **Fill** countries with palette colors, open **Country JSON Data**, draw **Paint** strokes, drop **Pins**, or use the **Eraser**. Changes auto-sync to `data/maps/<map>.json`. |
+| **JSON** | Opens the side-by-side **Map JSON Portal** right inside the browser. View and edit the entire map JSON file (with all **Country Names** visible), search/insert any world country via `+ Country`, validate syntax live, and click **Apply & Save JSON** (`Ctrl+S`) to re-render the map and write to disk. |
+
+---
+
+## 📂 Human-Editable JSON Format (`formatVersion: 2`)
+
+Every map in `data/maps/<slug>.json` uses Country Names as keys under `"countries"`:
 
 ```json
 {
-  "_guide": "Human-editable World Map Maker file. Under 'countries', use country names as keys, set 'color' to a palette name (see colorPalette) or #hex code (or null), and store any custom JSON object in 'data'.",
+  "_guide": "Human-editable World Map Maker file. Under 'countries', keys are Country Names, 'color' is a palette name (see colorPalette) or #hex (or null), and 'data' holds any custom JSON object.",
   "formatVersion": 2,
   "id": "culinary",
   "name": "Culinary",
@@ -80,56 +81,25 @@ Each saved map lives in `data/maps/<map-slug>.json` (for example, `data/maps/cul
         "dishes": [
           { "name": "Ramen", "tried": true },
           { "name": "Okonomiyaki", "tried": false }
-        ],
-        "notes": "Try Hiroshima-style okonomiyaki next"
+        ]
       }
     }
   },
-  "pins": [
-    {
-      "id": "pin-tokyo",
-      "title": "Tokyo Ramen Street",
-      "notes": "Eight famous ramen shops",
-      "color": "Emerald",
-      "coordinates": {
-        "latitude": 35.6812,
-        "longitude": 139.7671
-      }
-    }
-  ],
+  "pins": [],
   "freehandStrokes": []
 }
 ```
 
-> **Legacy Compatibility**: Older `formatVersion: 1` files using ISO-3166 numeric codes (`countryFills`) and `dots`/`strokes` arrays continue to load automatically and upgrade cleanly when saved.
-
 ---
 
 ## 🚀 Getting Started
-
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+ recommended)
-
-### Run Locally
 
 ```bash
 npm install
 npm start
 ```
 
-Then open `http://localhost:8080` in your browser.
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl + S` / `Cmd + S` | Save map file (or save open Country JSON modal) |
-| `Ctrl + Enter` | Save open Raw JSON editor |
-| `Ctrl + Z` / `Ctrl + Y` | Undo / Redo freehand stroke |
-| `Right-Click` on country | Open Country JSON editor directly |
-| `Esc` | Close active modal or popup |
+Open `http://localhost:8080` in your browser. (If the server was already running before pulling updates, restart `npm start` so the updated API routes take effect.)
 
 ---
 
@@ -137,13 +107,14 @@ Then open `http://localhost:8080` in your browser.
 
 ```text
 WorldMapMaker/
-├── server.js          # Express server & REST API for data/maps/*.json
+├── server.js                    # Express API & server-side JSON normalization
 ├── data/
-│   └── maps/          # Human-editable map JSON files (e.g. culinary.json)
+│   ├── country-catalog.json     # Canonical Country Names, ISO IDs & aliases
+│   └── maps/                    # Human-editable map JSON files (e.g. culinary.json)
 ├── public/
-│   ├── index.html     # Application layout & modals
-│   ├── styles.css     # Dark-mode glassmorphism styling
-│   └── app.js         # Map rendering, Country JSON builder/editor & sync
+│   ├── index.html               # Web portal layout (View | Edit | JSON modes)
+│   ├── styles.css               # Dark-mode glassmorphism design system
+│   └── app.js                   # D3 SVG map renderer, JSON portal &checklist UI
 └── README.md
 ```
 
@@ -151,4 +122,4 @@ WorldMapMaker/
 
 ## 📄 License
 
-This project is open source and available under the [MIT License](LICENSE).
+Available under the [MIT License](LICENSE).

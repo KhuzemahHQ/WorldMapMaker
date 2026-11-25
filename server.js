@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs').promises;
+const countryCatalog = require('./data/country-catalog.json');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -20,13 +21,68 @@ const DEFAULT_COLOR_PALETTE = {
 };
 
 const FILE_GUIDE =
-  "Human-editable World Map Maker file. Under 'countries', use country names as keys, set 'color' to a palette name (see colorPalette) or #hex code (or null), and store any custom JSON object in 'data'.";
+  "Human-editable World Map Maker file. Under 'countries', keys are Country Names, 'color' is a palette name (see colorPalette) or #hex (or null), and 'data' holds any custom JSON object.";
+
+// Build fast lookup tables for server-side country key normalization
+const CANONICAL_NAMES_LOWER = new Map();
+for (const name of Object.values(countryCatalog.isoToName)) {
+  CANONICAL_NAMES_LOWER.set(name.toLowerCase(), name);
+}
+for (const name of countryCatalog.extraCountries) {
+  CANONICAL_NAMES_LOWER.set(name.toLowerCase(), name);
+}
+
+function normalizeCountryName(rawKey) {
+  const key = String(rawKey || '').trim();
+  if (!key) return null;
+
+  // 1. Numeric ISO-3166 code (e.g. "124" or "4" -> "Canada" / "Afghanistan")
+  if (countryCatalog.isoToName[key]) {
+    return countryCatalog.isoToName[key];
+  }
+  if (/^\d{1,3}$/.test(key)) {
+    const padded = key.padStart(3, '0');
+    if (countryCatalog.isoToName[padded]) {
+      return countryCatalog.isoToName[padded];
+    }
+  }
+
+  // 2. Canonical country name (case-insensitive)
+  const lower = key.toLowerCase();
+  if (CANONICAL_NAMES_LOWER.has(lower)) {
+    return CANONICAL_NAMES_LOWER.get(lower);
+  }
+
+  // 3. Common alias (e.g. "USA" -> "United States of America")
+  if (countryCatalog.aliases[lower]) {
+    return countryCatalog.aliases[lower];
+  }
+
+  // 4. Preserve custom region/country key as entered
+  return key;
+}
+
+function normalizeColorNameOrHex(rawColor, palette = DEFAULT_COLOR_PALETTE) {
+  if (!rawColor || typeof rawColor !== 'string') return null;
+  const trimmed = rawColor.trim();
+  if (!trimmed) return null;
+
+  // Convert matching hex (e.g. "#e63946") to human-readable palette name ("Crimson")
+  for (const [name, hex] of Object.entries(palette)) {
+    if (
+      name.toLowerCase() === trimmed.toLowerCase() ||
+      (typeof hex === 'string' && hex.trim().toLowerCase() === trimmed.toLowerCase())
+    ) {
+      return name;
+    }
+  }
+  return trimmed;
+}
 
 // Middleware
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Ensure maps directory exists
 async function ensureMapsDir() {
   try {
     await fs.mkdir(MAPS_DIR, { recursive: true });
@@ -82,27 +138,19 @@ function hasNonEmptyData(data) {
   return Object.keys(data).length > 0;
 }
 
-function normalizeCountryRecord(rawEntry) {
+function normalizeCountryRecord(rawEntry, palette = DEFAULT_COLOR_PALETTE) {
   if (rawEntry === null || rawEntry === undefined) {
     return null;
   }
   if (typeof rawEntry === 'string') {
-    return {
-      color: rawEntry.trim() || null,
-      data: {},
-    };
+    const color = normalizeColorNameOrHex(rawEntry, palette);
+    return color ? { color, data: {} } : null;
   }
   if (Array.isArray(rawEntry)) {
-    return {
-      color: null,
-      data: { items: rawEntry },
-    };
+    return rawEntry.length > 0 ? { color: null, data: { items: rawEntry } } : null;
   }
   if (typeof rawEntry === 'object') {
-    const color =
-      typeof rawEntry.color === 'string' && rawEntry.color.trim()
-        ? rawEntry.color.trim()
-        : null;
+    const color = normalizeColorNameOrHex(rawEntry.color, palette);
 
     let dataObj = {};
     if (rawEntry.data !== undefined && rawEntry.data !== null) {
@@ -115,7 +163,7 @@ function normalizeCountryRecord(rawEntry) {
       }
     }
 
-    // Preserve any extra fields placed directly on the country object during offline edits
+    // Preserve any extra fields placed directly on the country object during offline/JSON edits
     for (const [k, v] of Object.entries(rawEntry)) {
       if (k !== 'color' && k !== 'data') {
         dataObj[k] = v;
@@ -136,24 +184,50 @@ function normalizeCountryRecord(rawEntry) {
 
 function formatMapDocument(input, id) {
   const nowIso = new Date().toISOString();
-  const rawCountries =
-    input.countries && typeof input.countries === 'object' && !Array.isArray(input.countries)
-      ? input.countries
-      : {};
+  const mergedPalette = {
+    ...DEFAULT_COLOR_PALETTE,
+    ...(input.colorPalette && typeof input.colorPalette === 'object' ? input.colorPalette : {}),
+  };
 
-  // Sort country keys alphabetically for clean offline reading and git diffs
-  const sortedCountries = {};
-  const countryKeys = Object.keys(rawCountries).sort((a, b) =>
-    a.localeCompare(b, 'en', { sensitivity: 'base' })
-  );
+  const combinedCountries = {};
 
-  for (const key of countryKeys) {
-    const trimmedKey = key.trim();
-    if (!trimmedKey) continue;
-    const normalized = normalizeCountryRecord(rawCountries[key]);
-    if (normalized) {
-      sortedCountries[trimmedKey] = normalized;
+  // 1. Migrate any legacy numeric countryFills automatically using countryCatalog
+  if (input.countryFills && typeof input.countryFills === 'object' && !Array.isArray(input.countryFills)) {
+    for (const [rawKey, rawHex] of Object.entries(input.countryFills)) {
+      const canonicalName = normalizeCountryName(rawKey);
+      const color = normalizeColorNameOrHex(rawHex, mergedPalette);
+      if (canonicalName && color) {
+        combinedCountries[canonicalName] = { color, data: {} };
+      }
     }
+  }
+
+  // 2. Normalize v2 countries dictionary (resolving aliases/ISO codes -> canonical Country Names)
+  if (input.countries && typeof input.countries === 'object' && !Array.isArray(input.countries)) {
+    for (const [rawKey, rawVal] of Object.entries(input.countries)) {
+      const canonicalName = normalizeCountryName(rawKey);
+      if (!canonicalName) continue;
+      const normalized = normalizeCountryRecord(rawVal, mergedPalette);
+      if (normalized) {
+        const prev = combinedCountries[canonicalName];
+        combinedCountries[canonicalName] = prev
+          ? {
+              color: normalized.color || prev.color || null,
+              data: { ...(prev.data || {}), ...(normalized.data || {}) },
+            }
+          : normalized;
+      } else {
+        delete combinedCountries[canonicalName];
+      }
+    }
+  }
+
+  // Sort country names alphabetically for clean human reading & git diffs
+  const sortedCountries = {};
+  for (const key of Object.keys(combinedCountries).sort((a, b) =>
+    a.localeCompare(b, 'en', { sensitivity: 'base' })
+  )) {
+    sortedCountries[key] = combinedCountries[key];
   }
 
   const fillOpacity =
@@ -163,19 +237,56 @@ function formatMapDocument(input, id) {
         ? input.fillOpacity
         : 0.55;
 
-  const pins = Array.isArray(input.pins)
+  const rawPins = Array.isArray(input.pins)
     ? input.pins
     : Array.isArray(input.dots)
       ? input.dots
       : [];
 
-  const freehandStrokes = Array.isArray(input.freehandStrokes)
+  const pins = rawPins
+    .map((p, idx) => {
+      const lat =
+        p.coordinates && typeof p.coordinates === 'object'
+          ? Number(p.coordinates.latitude ?? p.coordinates.lat)
+          : Array.isArray(p.geoCoords)
+            ? Number(p.geoCoords[1])
+            : NaN;
+      const lon =
+        p.coordinates && typeof p.coordinates === 'object'
+          ? Number(p.coordinates.longitude ?? p.coordinates.lon ?? p.coordinates.lng)
+          : Array.isArray(p.geoCoords)
+            ? Number(p.geoCoords[0])
+            : NaN;
+      if (Number.isNaN(lat) || Number.isNaN(lon)) return null;
+      return {
+        id: p.id || `pin-${idx + 1}`,
+        title: String(p.title || ''),
+        notes: p.notes !== undefined ? String(p.notes) : String(p.text || ''),
+        color: normalizeColorNameOrHex(p.color, mergedPalette) || 'Crimson',
+        coordinates: {
+          latitude: Math.round(lat * 10000) / 10000,
+          longitude: Math.round(lon * 10000) / 10000,
+        },
+      };
+    })
+    .filter(Boolean);
+
+  const rawStrokes = Array.isArray(input.freehandStrokes)
     ? input.freehandStrokes
     : Array.isArray(input.strokes)
       ? input.strokes
       : [];
 
-  const doc = {
+  const freehandStrokes = rawStrokes.map((s) => ({
+    color:
+      s.color === 'eraser'
+        ? 'eraser'
+        : normalizeColorNameOrHex(s.color, mergedPalette) || 'Crimson',
+    brushSize: Number(s.brushSize ?? s.size ?? 10),
+    points: Array.isArray(s.points) ? s.points : [],
+  }));
+
+  return {
     _guide: FILE_GUIDE,
     formatVersion: 2,
     id,
@@ -184,26 +295,11 @@ function formatMapDocument(input, id) {
     settings: {
       fillOpacity: Math.round(fillOpacity * 100) / 100,
     },
-    colorPalette: {
-      ...DEFAULT_COLOR_PALETTE,
-      ...(input.colorPalette && typeof input.colorPalette === 'object' ? input.colorPalette : {}),
-    },
+    colorPalette: mergedPalette,
     countries: sortedCountries,
     pins,
     freehandStrokes,
   };
-
-  // If legacy countryFills was sent without countries, keep it so client can migrate
-  if (
-    Object.keys(sortedCountries).length === 0 &&
-    input.countryFills &&
-    typeof input.countryFills === 'object' &&
-    Object.keys(input.countryFills).length > 0
-  ) {
-    doc.countryFills = input.countryFills;
-  }
-
-  return doc;
 }
 
 function summarizeMap(parsed, fileId, statMtimeMs) {
@@ -250,9 +346,14 @@ function summarizeMap(parsed, fileId, statMtimeMs) {
   };
 }
 
-// API Routes
+// ── API Routes ─────────────────────────────────────────────
 
-// List all maps
+// Serve canonical country catalog so frontend and backend share one dictionary
+app.get('/api/catalog', (req, res) => {
+  res.json(countryCatalog);
+});
+
+// List all maps in data/maps/
 app.get('/api/maps', async (req, res) => {
   try {
     await ensureMapsDir();
@@ -291,7 +392,6 @@ app.get('/api/maps', async (req, res) => {
       }
     }
 
-    // Sort by most recently modified
     maps.sort((a, b) => b.lastModified - a.lastModified);
     res.json(maps);
   } catch (err) {
@@ -300,7 +400,7 @@ app.get('/api/maps', async (req, res) => {
   }
 });
 
-// Get a specific map (always read fresh from disk so offline edits appear immediately)
+// Read a specific map fresh from disk (normalized to v2 with Country Names)
 app.get('/api/maps/:id', async (req, res) => {
   const filePath = resolveMapFilePath(req.params.id);
   if (!filePath) {
@@ -322,10 +422,13 @@ app.get('/api/maps/:id', async (req, res) => {
       });
     }
 
-    parsed.id = req.params.id;
-    parsed.fileName = `${req.params.id}.json`;
-    parsed.diskModifiedAt = new Date(stat.mtimeMs).toISOString();
-    res.json(parsed);
+    // Normalize into clean v2 structure in response so client & web JSON editor always see Country Names
+    const normalized = formatMapDocument(parsed, req.params.id);
+    normalized.updatedAt =
+      parsed.updatedAt || new Date(stat.mtimeMs).toISOString();
+    normalized.fileName = `${req.params.id}.json`;
+    normalized.diskModifiedAt = new Date(stat.mtimeMs).toISOString();
+    res.json(normalized);
   } catch (err) {
     if (err.code === 'ENOENT') {
       return res.status(404).json({ error: 'Map not found' });
@@ -352,6 +455,7 @@ app.post('/api/maps', async (req, res) => {
       fileName: `${id}.json`,
       name: formatted.name,
       updatedAt: formatted.updatedAt,
+      map: formatted,
     });
   } catch (err) {
     console.error(err);
@@ -359,7 +463,7 @@ app.post('/api/maps', async (req, res) => {
   }
 });
 
-// Update an existing map
+// Save / update an existing map
 app.put('/api/maps/:id', async (req, res) => {
   const currentId = req.params.id;
   const currentFilePath = resolveMapFilePath(currentId);
@@ -382,8 +486,6 @@ app.put('/api/maps/:id', async (req, res) => {
     const incomingName = String(req.body?.name || '').trim();
     const previousName = existingDoc?.name ? String(existingDoc.name).trim() : '';
 
-    // Rename file on disk only if user explicitly changed the map name
-    // or if upgrading from an old numeric/hash ID
     const isLegacyHashId = /^\d{13}[a-z0-9]+$/i.test(currentId);
     if (incomingName && (isLegacyHashId || (previousName && incomingName !== previousName))) {
       const desiredSlug = slugifyMapName(incomingName);
@@ -406,6 +508,7 @@ app.put('/api/maps/:id', async (req, res) => {
       fileName: `${targetId}.json`,
       name: formatted.name,
       updatedAt: formatted.updatedAt,
+      map: formatted,
     });
   } catch (err) {
     console.error(err);
@@ -416,10 +519,10 @@ app.put('/api/maps/:id', async (req, res) => {
 // Patch a single country's color/JSON data while preserving concurrent offline edits to other countries
 app.patch('/api/maps/:id/countries/:countryName', async (req, res) => {
   const mapId = req.params.id;
-  const countryName = String(req.params.countryName || '').trim();
+  const canonicalCountry = normalizeCountryName(req.params.countryName);
   const filePath = resolveMapFilePath(mapId);
 
-  if (!filePath || !countryName) {
+  if (!filePath || !canonicalCountry) {
     return res.status(400).json({ error: 'Invalid map ID or country name' });
   }
 
@@ -435,33 +538,25 @@ app.patch('/api/maps/:id/countries/:countryName', async (req, res) => {
       });
     }
 
-    if (!existing.countries || typeof existing.countries !== 'object' || Array.isArray(existing.countries)) {
-      existing.countries = {};
-    }
+    // Upgrade existing doc first (in case it was v1 or used aliases)
+    const upgraded = formatMapDocument(existing, mapId);
+    const normalizedEntry = normalizeCountryRecord(req.body, upgraded.colorPalette);
 
-    // Remove any case-insensitive duplicate key before setting canonical countryName
-    for (const existingKey of Object.keys(existing.countries)) {
-      if (existingKey.toLowerCase() === countryName.toLowerCase() && existingKey !== countryName) {
-        delete existing.countries[existingKey];
-      }
-    }
-
-    const normalized = normalizeCountryRecord(req.body);
-    if (normalized) {
-      existing.countries[countryName] = normalized;
+    if (normalizedEntry) {
+      upgraded.countries[canonicalCountry] = normalizedEntry;
     } else {
-      delete existing.countries[countryName];
+      delete upgraded.countries[canonicalCountry];
     }
 
-    const formatted = formatMapDocument(existing, mapId);
+    const formatted = formatMapDocument(upgraded, mapId);
     await fs.writeFile(filePath, JSON.stringify(formatted, null, 2) + '\n', 'utf8');
 
     res.json({
       success: true,
       id: mapId,
       fileName: `${mapId}.json`,
-      countryName,
-      entry: formatted.countries[countryName] || null,
+      countryName: canonicalCountry,
+      entry: formatted.countries[canonicalCountry] || null,
       updatedAt: formatted.updatedAt,
       map: formatted,
     });
@@ -497,7 +592,6 @@ if (require.main === module) {
       console.log(`Server is running on http://localhost:${PORT}`);
     });
 
-    // Graceful shutdown on Ctrl+C to evacuate port
     process.on('SIGINT', () => {
       console.log('\nGracefully shutting down (Ctrl+C)...');
       server.close(() => {
@@ -516,4 +610,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, formatMapDocument, slugifyMapName };
+module.exports = { app, formatMapDocument, slugifyMapName, normalizeCountryName };
